@@ -1,0 +1,24 @@
+[package]
+name = "roncad-app"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "roncad"
+path = "src/main.rs"
+
+[dependencies]
+roncad-core.workspace = true
+roncad-geometry.workspace = true
+roncad-rendering.workspace = true
+roncad-ui.workspace = true
+roncad-tools.workspace = true
+roncad-project-io.workspace = true
+eframe.workspace = true
+egui.workspace = true
+glam.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+anyhow.workspace = true

@@ -1,0 +1,16 @@
+[package]
+name = "roncad-tools"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[lib]
+name = "roncad_tools"
+path = "src/lib.rs"
+
+[dependencies]
+roncad-core.workspace = true
+roncad-geometry.workspace = true
+roncad-rendering.workspace = true
+glam.workspace = true

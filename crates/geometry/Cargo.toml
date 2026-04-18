@@ -1,0 +1,17 @@
+[package]
+name = "roncad-geometry"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[lib]
+name = "roncad_geometry"
+path = "src/lib.rs"
+
+[dependencies]
+roncad-core.workspace = true
+glam.workspace = true
+slotmap.workspace = true
+serde.workspace = true
+thiserror.workspace = true
