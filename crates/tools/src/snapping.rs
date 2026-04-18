@@ -16,6 +16,16 @@ pub enum SnapKind {
     Center,
 }
 
+impl SnapKind {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Grid => "Grid",
+            Self::Endpoint => "Endpoint",
+            Self::Center => "Center",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct SnapResult {
     pub point: DVec2,

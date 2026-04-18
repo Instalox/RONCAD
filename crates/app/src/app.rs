@@ -7,7 +7,7 @@ use roncad_core::command::AppCommand;
 use roncad_core::selection::Selection;
 use roncad_geometry::Project;
 use roncad_rendering::Camera2d;
-use roncad_tools::{SnapEngine, ToolManager};
+use roncad_tools::{SnapEngine, SnapResult, ToolManager};
 use roncad_ui::{apply_dark_theme, render_shell, ShellContext};
 
 use crate::dispatcher;
@@ -33,6 +33,7 @@ struct UiState {}
 struct ToolRuntimeState {
     manager: ToolManager,
     snap_engine: SnapEngine,
+    snap_result: Option<SnapResult>,
     cursor_world_mm: Option<glam::DVec2>,
 }
 
@@ -76,6 +77,7 @@ impl App for RonCadApp {
         let mut shell = ShellContext {
             tool_manager: &mut self.tool.manager,
             snap_engine: &self.tool.snap_engine,
+            snap_result: &mut self.tool.snap_result,
             selection: &self.document.selection,
             camera: &mut self.render.camera,
             project: &self.document.project,

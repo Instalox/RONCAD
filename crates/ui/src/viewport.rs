@@ -6,6 +6,7 @@ mod dimension_overlay;
 mod grid_overlay;
 mod hud_overlay;
 mod sketch_overlay;
+mod snap_overlay;
 mod tool_overlay;
 
 use egui::{CentralPanel, Color32, Frame, Key, PointerButton, Pos2, Rect, Sense, Ui};
@@ -14,7 +15,7 @@ use roncad_core::command::AppCommand;
 use roncad_core::ids::{SketchEntityId, SketchId};
 use roncad_geometry::pick_entity;
 use roncad_tools::{
-    ActiveToolKind, Modifiers, SnapEngine, ToolContext, ENTITY_PICK_RADIUS_PX,
+    ActiveToolKind, Modifiers, SnapEngine, SnapResult, ToolContext, ENTITY_PICK_RADIUS_PX,
 };
 
 use crate::shell::{ShellContext, ShellResponse};
@@ -48,6 +49,7 @@ pub fn render(ui: &mut Ui, shell: &mut ShellContext<'_>, response: &mut ShellRes
                 shell.project,
                 shell.selection,
             );
+            snap_overlay::paint(ui.painter(), rect, shell.camera, shell.snap_result.as_ref());
             tool_overlay::paint_preview(ui.painter(), rect, shell.camera, shell.tool_manager);
             hud_overlay::paint(ui, rect, shell);
         });
@@ -83,8 +85,12 @@ fn handle_input(
         modifiers,
     };
     let hovered_entity = hovered_selectable_entity(raw_cursor_world, active_kind, &ctx);
+    let snap_result = raw_cursor_world.and_then(|world| {
+        active_snap_result(world, active_kind, shell.snap_engine, &ctx)
+    });
+    *shell.snap_result = snap_result;
     let cursor_world = raw_cursor_world.map(|world| {
-        input_world_for_tool(world, active_kind, shell.snap_engine, &ctx)
+        snap_result.map_or(world, |snap| snap.point)
     });
     *shell.cursor_world_mm = cursor_world;
 
@@ -95,8 +101,8 @@ fn handle_input(
     if resp.clicked_by(PointerButton::Primary) {
         if let Some(p) = resp.interact_pointer_pos() {
             let raw_world = shell.camera.screen_to_world(pos_to_dvec(p), center);
-            let world =
-                input_world_for_tool(raw_world, active_kind, shell.snap_engine, &ctx);
+            let world = active_snap_result(raw_world, active_kind, shell.snap_engine, &ctx)
+                .map_or(raw_world, |snap| snap.point);
             let cmds = shell.tool_manager.on_pointer_click(&ctx, world);
             response.commands.extend(cmds);
         }
@@ -146,18 +152,17 @@ fn pick_step(pixels_per_mm: f64, min_px: f64) -> f64 {
     base
 }
 
-fn input_world_for_tool(
+fn active_snap_result(
     raw_world: DVec2,
     active_kind: ActiveToolKind,
     snap_engine: &SnapEngine,
     ctx: &ToolContext<'_>,
-) -> DVec2 {
+) -> Option<SnapResult> {
     if tool_uses_snap(active_kind) {
-        snap_engine
-            .snap(raw_world, ctx.sketch, ctx.pixels_per_mm)
-            .point
+        let result = snap_engine.snap(raw_world, ctx.sketch, ctx.pixels_per_mm);
+        result.kind.map(|_| result)
     } else {
-        raw_world
+        None
     }
 }
 

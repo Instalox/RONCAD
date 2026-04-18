@@ -25,6 +25,14 @@ pub fn render(ui: &mut Ui, shell: &ShellContext<'_>, _response: &mut ShellRespon
                     format!("Zoom {:.2} px/mm", shell.camera.pixels_per_mm),
                 );
 
+                if let Some(snap) = shell.snap_result.as_ref() {
+                    if let Some(kind) = snap.kind {
+                        ui.separator();
+                        ui.colored_label(ThemeColors::TEXT_DIM, "Snap");
+                        ui.colored_label(ThemeColors::ACCENT, kind.label());
+                    }
+                }
+
                 ui.separator();
                 let kind = shell.tool_manager.active_kind();
                 ui.colored_label(ThemeColors::TEXT_DIM, kind.hint());

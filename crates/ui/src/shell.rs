@@ -6,13 +6,14 @@ use roncad_core::command::AppCommand;
 use roncad_core::selection::Selection;
 use roncad_geometry::Project;
 use roncad_rendering::Camera2d;
-use roncad_tools::{SnapEngine, ToolManager};
+use roncad_tools::{SnapEngine, SnapResult, ToolManager};
 
 use crate::{inspector, project_tree, status_bar, tool_shelf, toolbar, viewport};
 
 pub struct ShellContext<'a> {
     pub tool_manager: &'a mut ToolManager,
     pub snap_engine: &'a SnapEngine,
+    pub snap_result: &'a mut Option<SnapResult>,
     pub selection: &'a Selection,
     pub camera: &'a mut Camera2d,
     pub project: &'a Project,
