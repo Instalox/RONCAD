@@ -41,7 +41,7 @@ impl SketchProfile {
 
 pub fn closed_profiles(sketch: &Sketch) -> Vec<SketchProfile> {
     let mut profiles = primitive_profiles(sketch);
-    profiles.extend(line_loop_profiles(sketch));
+    profiles.extend(planar_polygon_profiles(sketch));
     profiles
 }
 
@@ -56,81 +56,159 @@ fn primitive_profiles(sketch: &Sketch) -> Vec<SketchProfile> {
     sketch
         .iter()
         .filter_map(|(_, entity)| match entity {
-            SketchEntity::Rectangle { corner_a, corner_b } => {
-                let min = corner_a.min(*corner_b);
-                let max = corner_a.max(*corner_b);
-                Some(SketchProfile::Polygon {
-                    points: vec![
-                        DVec2::new(min.x, min.y),
-                        DVec2::new(max.x, min.y),
-                        DVec2::new(max.x, max.y),
-                        DVec2::new(min.x, max.y),
-                    ],
-                })
-            }
             SketchEntity::Circle { center, radius } => Some(SketchProfile::Circle {
                 center: *center,
                 radius: *radius,
             }),
-            SketchEntity::Point { .. } | SketchEntity::Line { .. } => None,
+            SketchEntity::Point { .. }
+            | SketchEntity::Line { .. }
+            | SketchEntity::Rectangle { .. } => None,
         })
         .collect()
 }
 
-fn line_loop_profiles(sketch: &Sketch) -> Vec<SketchProfile> {
-    let mut vertices = Vec::<DVec2>::new();
-    let mut vertex_ids = HashMap::<QuantizedPoint, usize>::new();
-    let mut edges = Vec::<(usize, usize)>::new();
-
-    for (_, entity) in sketch.iter() {
-        let SketchEntity::Line { a, b } = entity else {
-            continue;
-        };
-        let start = vertex_index(*a, &mut vertex_ids, &mut vertices);
-        let end = vertex_index(*b, &mut vertex_ids, &mut vertices);
-        if start == end {
-            continue;
-        }
-        edges.push((start, end));
-    }
-
-    if edges.is_empty() {
+fn planar_polygon_profiles(sketch: &Sketch) -> Vec<SketchProfile> {
+    let raw_segments = sketch_segments(sketch);
+    let segments = split_segments(&raw_segments);
+    if segments.is_empty() {
         return Vec::new();
     }
 
-    let mut adjacency = vec![Vec::<usize>::new(); vertices.len()];
-    for (edge_id, (start, end)) in edges.iter().enumerate() {
-        adjacency[*start].push(edge_id);
-        adjacency[*end].push(edge_id);
+    let (vertices, undirected_edges) = build_graph(&segments);
+    if undirected_edges.is_empty() {
+        return Vec::new();
     }
 
-    let mut visited_edges = vec![false; edges.len()];
+    let (half_edges, _) = build_half_edges(&vertices, &undirected_edges);
+    let mut visited = vec![false; half_edges.len()];
     let mut profiles = Vec::new();
 
-    for edge_id in 0..edges.len() {
-        if visited_edges[edge_id] {
-            continue;
-        }
-        let (component_edges, component_vertices) =
-            collect_component(edge_id, &edges, &adjacency, &mut visited_edges);
-
-        if component_edges.len() < 3 || component_edges.len() != component_vertices.len() {
-            continue;
-        }
-        if component_vertices
-            .iter()
-            .any(|vertex| component_degree(*vertex, &adjacency, &component_edges) != 2)
-        {
+    for start in 0..half_edges.len() {
+        if visited[start] {
             continue;
         }
 
-        let points = order_cycle(&vertices, &edges, &adjacency, &component_vertices);
-        if points.len() >= 3 && polygon_area(&points).abs() > PROFILE_EPSILON {
-            profiles.push(SketchProfile::Polygon { points });
+        let mut current = start;
+        let mut face = Vec::new();
+        loop {
+            if visited[current] && current != start {
+                face.clear();
+                break;
+            }
+            visited[current] = true;
+            face.push(vertices[half_edges[current].from]);
+            current = half_edges[current].next;
+            if current == start {
+                break;
+            }
+            if face.len() > half_edges.len() {
+                face.clear();
+                break;
+            }
+        }
+
+        if face.len() < 3 {
+            continue;
+        }
+
+        simplify_polygon(&mut face);
+        if face.len() < 3 {
+            continue;
+        }
+
+        let area = polygon_area(&face);
+        if area > PROFILE_EPSILON {
+            profiles.push(SketchProfile::Polygon { points: face });
         }
     }
 
     profiles
+}
+
+fn sketch_segments(sketch: &Sketch) -> Vec<(DVec2, DVec2)> {
+    let mut segments = Vec::new();
+    for (_, entity) in sketch.iter() {
+        match entity {
+            SketchEntity::Line { a, b } => segments.push((*a, *b)),
+            SketchEntity::Rectangle { corner_a, corner_b } => {
+                let min = corner_a.min(*corner_b);
+                let max = corner_a.max(*corner_b);
+                let corners = [
+                    DVec2::new(min.x, min.y),
+                    DVec2::new(max.x, min.y),
+                    DVec2::new(max.x, max.y),
+                    DVec2::new(min.x, max.y),
+                ];
+                for i in 0..4 {
+                    segments.push((corners[i], corners[(i + 1) % 4]));
+                }
+            }
+            SketchEntity::Point { .. } | SketchEntity::Circle { .. } => {}
+        }
+    }
+    segments
+}
+
+fn split_segments(raw_segments: &[(DVec2, DVec2)]) -> Vec<(DVec2, DVec2)> {
+    let mut split_points: Vec<Vec<DVec2>> = raw_segments
+        .iter()
+        .map(|(start, end)| vec![*start, *end])
+        .collect();
+
+    for i in 0..raw_segments.len() {
+        for j in (i + 1)..raw_segments.len() {
+            let (a, b) = raw_segments[i];
+            let (c, d) = raw_segments[j];
+            let Some(hit) = segment_intersection(a, b, c, d) else {
+                continue;
+            };
+            split_points[i].push(hit.point);
+            split_points[j].push(hit.point);
+        }
+    }
+
+    let mut segments = Vec::new();
+    for (index, (start, end)) in raw_segments.iter().enumerate() {
+        let mut points = split_points[index].clone();
+        points.sort_by(|lhs, rhs| {
+            segment_parameter(*start, *end, *lhs)
+                .total_cmp(&segment_parameter(*start, *end, *rhs))
+        });
+        points.dedup_by(|lhs, rhs| lhs.distance_squared(*rhs) <= PROFILE_EPSILON * PROFILE_EPSILON);
+
+        for window in points.windows(2) {
+            let a = window[0];
+            let b = window[1];
+            if a.distance_squared(b) > PROFILE_EPSILON * PROFILE_EPSILON {
+                segments.push((a, b));
+            }
+        }
+    }
+
+    segments
+}
+
+fn build_graph(
+    segments: &[(DVec2, DVec2)],
+) -> (Vec<DVec2>, Vec<(usize, usize)>) {
+    let mut vertices = Vec::<DVec2>::new();
+    let mut vertex_ids = HashMap::<QuantizedPoint, usize>::new();
+    let mut edges = Vec::<(usize, usize)>::new();
+    let mut seen_edges = HashSet::<(usize, usize)>::new();
+
+    for (start, end) in segments {
+        let a = vertex_index(*start, &mut vertex_ids, &mut vertices);
+        let b = vertex_index(*end, &mut vertex_ids, &mut vertices);
+        if a == b {
+            continue;
+        }
+        let key = if a < b { (a, b) } else { (b, a) };
+        if seen_edges.insert(key) {
+            edges.push(key);
+        }
+    }
+
+    (vertices, edges)
 }
 
 fn vertex_index(
@@ -146,85 +224,125 @@ fn vertex_index(
     })
 }
 
-fn collect_component(
-    start_edge: usize,
-    edges: &[(usize, usize)],
-    adjacency: &[Vec<usize>],
-    visited_edges: &mut [bool],
-) -> (HashSet<usize>, HashSet<usize>) {
-    let mut stack = vec![start_edge];
-    let mut component_edges = HashSet::new();
-    let mut component_vertices = HashSet::new();
-
-    while let Some(edge_id) = stack.pop() {
-        if visited_edges[edge_id] {
-            continue;
-        }
-        visited_edges[edge_id] = true;
-        component_edges.insert(edge_id);
-
-        let (start, end) = edges[edge_id];
-        for vertex in [start, end] {
-            component_vertices.insert(vertex);
-            for &next_edge in &adjacency[vertex] {
-                if !visited_edges[next_edge] {
-                    stack.push(next_edge);
-                }
-            }
-        }
-    }
-
-    (component_edges, component_vertices)
+#[derive(Debug, Clone, Copy)]
+struct HalfEdge {
+    from: usize,
+    to: usize,
+    reverse: usize,
+    next: usize,
+    angle: f64,
 }
 
-fn component_degree(
-    vertex: usize,
-    adjacency: &[Vec<usize>],
-    component_edges: &HashSet<usize>,
-) -> usize {
-    adjacency[vertex]
-        .iter()
-        .filter(|edge_id| component_edges.contains(edge_id))
-        .count()
-}
-
-fn order_cycle(
+fn build_half_edges(
     vertices: &[DVec2],
-    edges: &[(usize, usize)],
-    adjacency: &[Vec<usize>],
-    component_vertices: &HashSet<usize>,
-) -> Vec<DVec2> {
-    let Some(&start) = component_vertices.iter().min() else {
-        return Vec::new();
-    };
+    undirected_edges: &[(usize, usize)],
+) -> (Vec<HalfEdge>, Vec<Vec<usize>>) {
+    let mut half_edges = Vec::<HalfEdge>::with_capacity(undirected_edges.len() * 2);
+    let mut outgoing = vec![Vec::<usize>::new(); vertices.len()];
 
-    let mut ordered = Vec::with_capacity(component_vertices.len());
-    let mut previous = None;
-    let mut current = start;
-
-    for _ in 0..=component_vertices.len() {
-        ordered.push(vertices[current]);
-
-        let next = adjacency[current]
-            .iter()
-            .filter_map(|edge_id| {
-                let (a, b) = edges[*edge_id];
-                let neighbor = if a == current { b } else { a };
-                (Some(neighbor) != previous).then_some(neighbor)
-            })
-            .next();
-
-        let Some(next_vertex) = next else {
-            return Vec::new();
-        };
-        if next_vertex == start {
-            break;
-        }
-        previous = Some(current);
-        current = next_vertex;
+    for &(a, b) in undirected_edges {
+        let forward = half_edges.len();
+        let reverse = forward + 1;
+        half_edges.push(HalfEdge {
+            from: a,
+            to: b,
+            reverse,
+            next: usize::MAX,
+            angle: edge_angle(vertices[a], vertices[b]),
+        });
+        half_edges.push(HalfEdge {
+            from: b,
+            to: a,
+            reverse: forward,
+            next: usize::MAX,
+            angle: edge_angle(vertices[b], vertices[a]),
+        });
+        outgoing[a].push(forward);
+        outgoing[b].push(reverse);
     }
 
-    ordered
+    for edges in &mut outgoing {
+        edges.sort_by(|lhs, rhs| half_edges[*lhs].angle.total_cmp(&half_edges[*rhs].angle));
+    }
+
+    for edge_id in 0..half_edges.len() {
+        let to = half_edges[edge_id].to;
+        let reverse = half_edges[edge_id].reverse;
+        let edges = &outgoing[to];
+        let pos = edges
+            .iter()
+            .position(|candidate| *candidate == reverse)
+            .expect("reverse half-edge is present at destination");
+        let next = edges[(pos + edges.len() - 1) % edges.len()];
+        half_edges[edge_id].next = next;
+    }
+
+    (half_edges, outgoing)
+}
+
+fn edge_angle(a: DVec2, b: DVec2) -> f64 {
+    let delta = b - a;
+    delta.y.atan2(delta.x)
+}
+
+#[derive(Debug, Clone, Copy)]
+struct SegmentIntersection {
+    point: DVec2,
+}
+
+fn segment_intersection(
+    a: DVec2,
+    b: DVec2,
+    c: DVec2,
+    d: DVec2,
+) -> Option<SegmentIntersection> {
+    let r = b - a;
+    let s = d - c;
+    let denom = cross(r, s);
+    if denom.abs() <= PROFILE_EPSILON {
+        return None;
+    }
+
+    let q = c - a;
+    let t_ab = cross(q, s) / denom;
+    let t_cd = cross(q, r) / denom;
+    if !(-PROFILE_EPSILON..=1.0 + PROFILE_EPSILON).contains(&t_ab)
+        || !(-PROFILE_EPSILON..=1.0 + PROFILE_EPSILON).contains(&t_cd)
+    {
+        return None;
+    }
+
+    Some(SegmentIntersection {
+        point: a + r * t_ab.clamp(0.0, 1.0),
+    })
+}
+
+fn segment_parameter(a: DVec2, b: DVec2, point: DVec2) -> f64 {
+    let delta = b - a;
+    if delta.x.abs() >= delta.y.abs() && delta.x.abs() > PROFILE_EPSILON {
+        (point.x - a.x) / delta.x
+    } else if delta.y.abs() > PROFILE_EPSILON {
+        (point.y - a.y) / delta.y
+    } else {
+        0.0
+    }
+}
+
+fn simplify_polygon(points: &mut Vec<DVec2>) {
+    let mut index = 0;
+    while index < points.len() && points.len() >= 3 {
+        let prev = points[(index + points.len() - 1) % points.len()];
+        let current = points[index];
+        let next = points[(index + 1) % points.len()];
+        let collinear = cross(current - prev, next - current).abs() <= PROFILE_EPSILON;
+        let between = (current.distance_squared(prev) > PROFILE_EPSILON * PROFILE_EPSILON)
+            && (current.distance_squared(next) > PROFILE_EPSILON * PROFILE_EPSILON);
+        if collinear && between {
+            points.remove(index);
+        } else {
+            index += 1;
+        }
+    }
 }
 
 fn polygon_area(points: &[DVec2]) -> f64 {
@@ -286,6 +404,10 @@ fn distance_point_segment(point: DVec2, a: DVec2, b: DVec2) -> f64 {
     point.distance(a + ab * t)
 }
 
+fn cross(a: DVec2, b: DVec2) -> f64 {
+    a.x * b.y - a.y * b.x
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 struct QuantizedPoint(i64, i64);
 
@@ -334,6 +456,27 @@ mod tests {
             SketchProfile::Polygon { points } if points.len() == 4
         ));
         assert_eq!(profiles[0].area(), 80.0);
+    }
+
+    #[test]
+    fn rectangle_split_by_center_line_becomes_two_profiles() {
+        let mut sketch = Sketch::new("Sketch", WorkplaneId::default());
+        sketch.add(SketchEntity::Rectangle {
+            corner_a: dvec2(0.0, 0.0),
+            corner_b: dvec2(20.0, 10.0),
+        });
+        sketch.add(SketchEntity::Line {
+            a: dvec2(10.0, 0.0),
+            b: dvec2(10.0, 10.0),
+        });
+
+        let mut areas: Vec<_> = closed_profiles(&sketch)
+            .into_iter()
+            .map(|profile| profile.area())
+            .collect();
+        areas.sort_by(|lhs, rhs| lhs.total_cmp(rhs));
+
+        assert_eq!(areas, vec![100.0, 100.0]);
     }
 
     #[test]
