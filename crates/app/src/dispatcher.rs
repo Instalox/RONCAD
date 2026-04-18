@@ -3,7 +3,7 @@
 
 use roncad_core::command::AppCommand;
 use roncad_core::selection::{Selection, SelectionItem};
-use roncad_geometry::{Project, SketchEntity, Sketch};
+use roncad_geometry::{Project, Sketch, SketchDimension, SketchEntity};
 
 pub fn apply(
     project: &mut Project,
@@ -53,6 +53,14 @@ pub fn apply(
                 s.add(SketchEntity::Circle {
                     center: *center,
                     radius: radius.as_f64(),
+                });
+            }
+        }
+        AppCommand::AddDistanceDimension { sketch, start, end } => {
+            if let Some(s) = project.sketches.get_mut(*sketch) {
+                s.add_dimension(SketchDimension::Distance {
+                    start: *start,
+                    end: *end,
                 });
             }
         }
@@ -125,7 +133,7 @@ pub fn apply(
 mod tests {
     use glam::dvec2;
     use roncad_core::selection::SelectionItem;
-    use roncad_geometry::{Project, Sketch};
+    use roncad_geometry::{Project, Sketch, SketchDimension};
 
     use super::apply;
     use roncad_core::command::AppCommand;
@@ -199,5 +207,34 @@ mod tests {
 
         assert_eq!(project.active_sketch, Some(second));
         assert!(selection.is_empty());
+    }
+
+    #[test]
+    fn add_distance_dimension_persists_on_sketch() {
+        let mut project = Project::new_untitled();
+        let mut selection = Selection::default();
+        let sketch = project.active_sketch.expect("default project has sketch");
+
+        apply(
+            &mut project,
+            &mut selection,
+            &AppCommand::AddDistanceDimension {
+                sketch,
+                start: dvec2(1.0, 2.0),
+                end: dvec2(6.0, 2.0),
+            },
+        );
+
+        let dimensions: Vec<_> = project
+            .active_sketch()
+            .expect("active sketch")
+            .iter_dimensions()
+            .collect();
+        assert_eq!(dimensions.len(), 1);
+        assert!(matches!(
+            dimensions[0].1,
+            SketchDimension::Distance { start, end }
+                if *start == dvec2(1.0, 2.0) && *end == dvec2(6.0, 2.0)
+        ));
     }
 }

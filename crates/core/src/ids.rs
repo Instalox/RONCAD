@@ -7,6 +7,7 @@ use slotmap::new_key_type;
 new_key_type! {
     pub struct SketchId;
     pub struct SketchEntityId;
+    pub struct SketchDimensionId;
     pub struct ConstraintId;
     pub struct WorkplaneId;
     pub struct BodyId;

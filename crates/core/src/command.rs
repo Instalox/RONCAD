@@ -30,6 +30,11 @@ pub enum AppCommand {
         center: DVec2,
         radius: LengthMm,
     },
+    AddDistanceDimension {
+        sketch: SketchId,
+        start: DVec2,
+        end: DVec2,
+    },
     DeleteEntity {
         sketch: SketchId,
         entity: SketchEntityId,

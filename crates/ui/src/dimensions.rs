@@ -1,10 +1,12 @@
 //! Shared read-only dimension descriptions for inspector and viewport overlays.
 //! Keeps sketch measurement formatting in one place inside the UI layer.
 
-use egui::{Align2, Vec2};
+use egui::{Align2, Color32, Vec2};
 use glam::DVec2;
 use roncad_core::selection::{Selection, SelectionItem};
-use roncad_geometry::{Project, SketchEntity};
+use roncad_geometry::{Project, SketchDimension, SketchEntity};
+
+use crate::theme::ThemeColors;
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct DimensionValue {
@@ -21,9 +23,11 @@ impl DimensionValue {
 #[derive(Debug, Clone)]
 pub(crate) struct DimensionAnnotation {
     pub anchor_world: DVec2,
+    pub span_world: Option<(DVec2, DVec2)>,
     pub offset_px: Vec2,
     pub align: Align2,
     pub text: String,
+    pub color: Color32,
 }
 
 #[derive(Debug, Clone)]
@@ -56,6 +60,19 @@ pub(crate) fn selected_entity_dimensions(
     dimensions
 }
 
+pub(crate) fn active_sketch_dimension_annotations(
+    project: &Project,
+) -> Vec<DimensionAnnotation> {
+    let Some(sketch) = project.active_sketch() else {
+        return Vec::new();
+    };
+
+    sketch
+        .iter_dimensions()
+        .map(|(_, dimension)| describe_sketch_dimension_annotation(dimension))
+        .collect()
+}
+
 fn describe_entity(entity: &SketchEntity) -> EntityDimensions {
     match entity {
         SketchEntity::Point { p } => EntityDimensions {
@@ -72,9 +89,11 @@ fn describe_entity(entity: &SketchEntity) -> EntityDimensions {
             ],
             annotations: vec![DimensionAnnotation {
                 anchor_world: *p,
+                span_world: None,
                 offset_px: Vec2::new(10.0, -10.0),
                 align: Align2::LEFT_BOTTOM,
                 text: format!("X {}\nY {}", format_mm(p.x), format_mm(p.y)),
+                color: ThemeColors::TEXT,
             }],
         },
         SketchEntity::Line { a, b } => {
@@ -88,9 +107,11 @@ fn describe_entity(entity: &SketchEntity) -> EntityDimensions {
                 }],
                 annotations: vec![DimensionAnnotation {
                     anchor_world: midpoint,
+                    span_world: None,
                     offset_px: Vec2::new(0.0, -10.0),
                     align: Align2::CENTER_BOTTOM,
                     text: format!("L {}", format_mm(length)),
+                    color: ThemeColors::TEXT,
                 }],
             }
         }
@@ -114,15 +135,19 @@ fn describe_entity(entity: &SketchEntity) -> EntityDimensions {
                 annotations: vec![
                     DimensionAnnotation {
                         anchor_world: DVec2::new((min.x + max.x) * 0.5, max.y),
+                        span_world: None,
                         offset_px: Vec2::new(0.0, -10.0),
                         align: Align2::CENTER_BOTTOM,
                         text: format!("W {}", format_mm(width)),
+                        color: ThemeColors::TEXT,
                     },
                     DimensionAnnotation {
                         anchor_world: DVec2::new(max.x, (min.y + max.y) * 0.5),
+                        span_world: None,
                         offset_px: Vec2::new(10.0, 0.0),
                         align: Align2::LEFT_CENTER,
                         text: format!("H {}", format_mm(height)),
+                        color: ThemeColors::TEXT,
                     },
                 ],
             }
@@ -141,11 +166,42 @@ fn describe_entity(entity: &SketchEntity) -> EntityDimensions {
             ],
             annotations: vec![DimensionAnnotation {
                 anchor_world: *center + DVec2::new(*radius, 0.0),
+                span_world: None,
                 offset_px: Vec2::new(10.0, 0.0),
                 align: Align2::LEFT_CENTER,
                 text: format!("R {}", format_mm(*radius)),
+                color: ThemeColors::TEXT,
             }],
         },
+    }
+}
+
+fn describe_sketch_dimension_annotation(
+    dimension: &SketchDimension,
+) -> DimensionAnnotation {
+    match dimension {
+        SketchDimension::Distance { start, end } => {
+            let delta = *end - *start;
+            let (offset_px, align) = dimension_label_offset(delta);
+            DimensionAnnotation {
+                anchor_world: (*start + *end) * 0.5,
+                span_world: Some((*start, *end)),
+                offset_px,
+                align,
+                text: format_value(start.distance(*end)),
+                color: ThemeColors::ACCENT_AMBER,
+            }
+        }
+    }
+}
+
+fn dimension_label_offset(delta: DVec2) -> (Vec2, Align2) {
+    if delta.x.abs() >= delta.y.abs() * 1.5 {
+        (Vec2::new(0.0, -14.0), Align2::CENTER_BOTTOM)
+    } else if delta.y.abs() >= delta.x.abs() * 1.5 {
+        (Vec2::new(12.0, 0.0), Align2::LEFT_CENTER)
+    } else {
+        (Vec2::new(10.0, -10.0), Align2::LEFT_BOTTOM)
     }
 }
 
@@ -153,13 +209,18 @@ fn format_mm(value_mm: f64) -> String {
     format!("{value_mm:.3} mm")
 }
 
+fn format_value(value_mm: f64) -> String {
+    format!("{value_mm:.3}")
+}
+
 #[cfg(test)]
 mod tests {
     use glam::dvec2;
     use roncad_core::selection::{Selection, SelectionItem};
-    use roncad_geometry::{Project, SketchEntity};
+    use roncad_geometry::{Project, SketchDimension, SketchEntity};
 
-    use super::selected_entity_dimensions;
+    use super::{active_sketch_dimension_annotations, selected_entity_dimensions};
+    use crate::theme::ThemeColors;
 
     #[test]
     fn selected_line_reports_length() {
@@ -208,5 +269,23 @@ mod tests {
         assert_eq!(dims[0].summary[1].value_mm, 6.0);
         assert_eq!(dims[0].annotations[0].text, "W 10.000 mm");
         assert_eq!(dims[0].annotations[1].text, "H 6.000 mm");
+    }
+
+    #[test]
+    fn sketch_distance_dimension_annotation_is_amber_value_only() {
+        let mut project = Project::new_untitled();
+        project
+            .active_sketch_mut()
+            .expect("active sketch")
+            .add_dimension(SketchDimension::Distance {
+                start: dvec2(0.0, 0.0),
+                end: dvec2(0.0, 7.5),
+            });
+
+        let annotations = active_sketch_dimension_annotations(&project);
+
+        assert_eq!(annotations.len(), 1);
+        assert_eq!(annotations[0].text, "7.500");
+        assert_eq!(annotations[0].color, ThemeColors::ACCENT_AMBER);
     }
 }

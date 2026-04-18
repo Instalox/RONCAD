@@ -1,5 +1,5 @@
-//! Dimension tool: pick two points to inspect a distance without mutating the
-//! sketch. This is a transient measurement tool until editable dimensions land.
+//! Dimension tool: pick two points to create a persistent sketch distance
+//! dimension. This is the first step before editable driven dimensions land.
 
 use glam::DVec2;
 use roncad_core::command::AppCommand;
@@ -10,7 +10,7 @@ use crate::tool::{ActiveToolKind, Tool, ToolContext, ToolPreview};
 enum DimensionState {
     Idle,
     Anchored { start: DVec2, cursor: DVec2 },
-    Locked { start: DVec2, end: DVec2 },
+    Locked,
 }
 
 impl Default for DimensionState {
@@ -40,9 +40,14 @@ impl Tool for DimensionTool {
 
     fn on_pointer_click(
         &mut self,
-        _ctx: &ToolContext<'_>,
+        ctx: &ToolContext<'_>,
         world_mm: DVec2,
     ) -> Vec<AppCommand> {
+        let Some(sketch) = ctx.active_sketch else {
+            return Vec::new();
+        };
+
+        let mut commands = Vec::new();
         self.state = match self.state {
             DimensionState::Idle => DimensionState::Anchored {
                 start: world_mm,
@@ -55,18 +60,20 @@ impl Tool for DimensionTool {
                         cursor: world_mm,
                     }
                 } else {
-                    DimensionState::Locked {
+                    commands.push(AppCommand::AddDistanceDimension {
+                        sketch,
                         start,
                         end: world_mm,
-                    }
+                    });
+                    DimensionState::Locked
                 }
             }
-            DimensionState::Locked { .. } => DimensionState::Anchored {
+            DimensionState::Locked => DimensionState::Anchored {
                 start: world_mm,
                 cursor: world_mm,
             },
         };
-        Vec::new()
+        commands
     }
 
     fn on_escape(&mut self) {
@@ -79,20 +86,20 @@ impl Tool for DimensionTool {
             DimensionState::Anchored { start, cursor } => {
                 ToolPreview::Measurement { start, end: cursor }
             }
-            DimensionState::Locked { start, end } => ToolPreview::Measurement { start, end },
+            DimensionState::Locked => ToolPreview::None,
         }
     }
 
     fn step_hint(&self) -> Option<String> {
         Some(match self.state {
             DimensionState::Idle => {
-                "Click first point to start measuring. Shortcut: D. Esc clears.".to_string()
+                "Click first point to create a dimension. Shortcut: D. Esc clears.".to_string()
             }
             DimensionState::Anchored { .. } => {
-                "Click second point to lock measurement. Esc clears.".to_string()
+                "Click second point to place persistent dimension. Esc clears.".to_string()
             }
-            DimensionState::Locked { .. } => {
-                "Measurement locked. Click anywhere to start a new one. Esc clears.".to_string()
+            DimensionState::Locked => {
+                "Dimension placed. Click anywhere to start a new one. Esc clears.".to_string()
             }
         })
     }
@@ -101,39 +108,45 @@ impl Tool for DimensionTool {
 #[cfg(test)]
 mod tests {
     use glam::dvec2;
+    use roncad_core::command::AppCommand;
+    use roncad_geometry::Project;
 
     use super::DimensionTool;
     use crate::tool::{Tool, ToolContext, ToolPreview};
 
-    fn empty_ctx() -> ToolContext<'static> {
-        ToolContext {
-            active_sketch: None,
-            sketch: None,
-            pixels_per_mm: 10.0,
-            modifiers: Default::default(),
-        }
-    }
-
     #[test]
     fn second_click_locks_measurement_preview() {
         let mut tool = DimensionTool::default();
-        let ctx = empty_ctx();
+        let project = Project::new_untitled();
+        let ctx = ToolContext {
+            active_sketch: project.active_sketch,
+            sketch: project.active_sketch(),
+            pixels_per_mm: 10.0,
+            modifiers: Default::default(),
+        };
 
         tool.on_pointer_click(&ctx, dvec2(0.0, 0.0));
         tool.on_pointer_move(&ctx, dvec2(3.0, 4.0));
-        tool.on_pointer_click(&ctx, dvec2(3.0, 4.0));
+        let commands = tool.on_pointer_click(&ctx, dvec2(3.0, 4.0));
 
+        assert!(matches!(tool.preview(), ToolPreview::None));
         assert!(matches!(
-            tool.preview(),
-            ToolPreview::Measurement { start, end }
-                if start == dvec2(0.0, 0.0) && end == dvec2(3.0, 4.0)
+            commands.as_slice(),
+            [AppCommand::AddDistanceDimension { start, end, .. }]
+                if *start == dvec2(0.0, 0.0) && *end == dvec2(3.0, 4.0)
         ));
     }
 
     #[test]
     fn third_click_starts_new_measurement() {
         let mut tool = DimensionTool::default();
-        let ctx = empty_ctx();
+        let project = Project::new_untitled();
+        let ctx = ToolContext {
+            active_sketch: project.active_sketch,
+            sketch: project.active_sketch(),
+            pixels_per_mm: 10.0,
+            modifiers: Default::default(),
+        };
 
         tool.on_pointer_click(&ctx, dvec2(0.0, 0.0));
         tool.on_pointer_click(&ctx, dvec2(10.0, 0.0));

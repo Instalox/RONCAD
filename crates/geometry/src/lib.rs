@@ -4,11 +4,13 @@
 pub mod pick;
 pub mod project;
 pub mod sketch;
+pub mod sketch_dimension;
 pub mod sketch_entity;
 pub mod workplane;
 
 pub use pick::{distance_to_entity, pick_entity};
 pub use project::Project;
 pub use sketch::Sketch;
+pub use sketch_dimension::SketchDimension;
 pub use sketch_entity::SketchEntity;
 pub use workplane::Workplane;
