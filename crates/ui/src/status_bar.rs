@@ -40,7 +40,7 @@ pub fn render(ui: &mut Ui, shell: &ShellContext<'_>, _response: &mut ShellRespon
                 }
 
                 ui.separator();
-                ui.colored_label(ThemeColors::TEXT_DIM, kind.hint());
+                ui.colored_label(ThemeColors::TEXT_DIM, shell.tool_manager.step_hint());
 
                 if let ToolPreview::Measurement { start, end } = shell.tool_manager.preview() {
                     ui.separator();

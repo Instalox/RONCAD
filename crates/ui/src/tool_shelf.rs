@@ -39,7 +39,7 @@ pub fn render(ui: &mut Ui, shell: &mut ShellContext<'_>, _response: &mut ShellRe
                     if response.clicked() {
                         shell.tool_manager.set_active(*tool);
                     }
-                    response.on_hover_text(tool.label());
+                    response.on_hover_text(tool_hover_text(*tool));
                     ui.add_space(2.0);
                 }
 
@@ -56,6 +56,13 @@ pub fn render(ui: &mut Ui, shell: &mut ShellContext<'_>, _response: &mut ShellRe
                 );
             });
         });
+}
+
+fn tool_hover_text(tool: ActiveToolKind) -> String {
+    match tool.shortcut() {
+        Some(shortcut) => format!("{} ({shortcut})", tool.label()),
+        None => tool.label().to_string(),
+    }
 }
 
 fn tool_glyph(tool: ActiveToolKind) -> &'static str {

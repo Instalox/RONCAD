@@ -7,10 +7,12 @@ pub(super) fn paint(ui: &mut Ui, rect: Rect, shell: &ShellContext<'_>) {
     let pad = 8.0;
     let kind = shell.tool_manager.active_kind();
     let accent = crate::theme::ThemeColors::tool_accent(kind);
+    let shortcut = kind.shortcut().map_or(String::new(), |shortcut| format!(" [{shortcut}]"));
     let text = format!(
-        "{}   |   {}   |   middle/right-drag: pan   |   scroll: zoom",
+        "{}{}   |   {}   |   middle/right-drag: pan   |   scroll: zoom",
         kind.label(),
-        kind.hint()
+        shortcut,
+        shell.tool_manager.step_hint(),
     );
     painter.text(
         Pos2::new(rect.min.x + pad, rect.min.y + pad),

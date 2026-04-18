@@ -65,6 +65,7 @@ fn handle_input(
     if resp.clicked() {
         resp.request_focus();
     }
+    handle_tool_shortcuts(ui, shell.tool_manager);
     let active_kind = shell.tool_manager.active_kind();
 
     let raw_cursor_world = resp
@@ -189,6 +190,35 @@ fn tool_uses_snap(kind: ActiveToolKind) -> bool {
             | ActiveToolKind::Circle
             | ActiveToolKind::Dimension
     )
+}
+
+fn handle_tool_shortcuts(ui: &Ui, manager: &mut roncad_tools::ToolManager) {
+    if ui.ctx().egui_wants_keyboard_input() {
+        return;
+    }
+
+    let next = ui.ctx().input(|i| {
+        if i.modifiers.ctrl || i.modifiers.alt || i.modifiers.command {
+            return None;
+        }
+        if i.key_pressed(Key::V) {
+            Some(ActiveToolKind::Select)
+        } else if i.key_pressed(Key::L) {
+            Some(ActiveToolKind::Line)
+        } else if i.key_pressed(Key::R) {
+            Some(ActiveToolKind::Rectangle)
+        } else if i.key_pressed(Key::C) {
+            Some(ActiveToolKind::Circle)
+        } else if i.key_pressed(Key::D) {
+            Some(ActiveToolKind::Dimension)
+        } else {
+            None
+        }
+    });
+
+    if let Some(kind) = next {
+        manager.set_active(kind);
+    }
 }
 
 fn screen_center(rect: Rect) -> DVec2 {

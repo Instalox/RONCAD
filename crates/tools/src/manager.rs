@@ -62,6 +62,12 @@ impl ToolManager {
     pub fn preview(&self) -> ToolPreview {
         self.tool.preview()
     }
+
+    pub fn step_hint(&self) -> String {
+        self.tool
+            .step_hint()
+            .unwrap_or_else(|| self.active_kind.hint().to_string())
+    }
 }
 
 fn make_tool(kind: ActiveToolKind) -> Box<dyn Tool> {

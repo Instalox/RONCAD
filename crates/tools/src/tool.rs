@@ -43,6 +43,17 @@ impl ActiveToolKind {
             Self::Extrude => "Pick a closed profile to extrude.",
         }
     }
+
+    pub fn shortcut(self) -> Option<&'static str> {
+        match self {
+            Self::Select => Some("V"),
+            Self::Line => Some("L"),
+            Self::Rectangle => Some("R"),
+            Self::Circle => Some("C"),
+            Self::Dimension => Some("D"),
+            Self::Pan | Self::Extrude => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -86,5 +97,9 @@ pub trait Tool: Send {
 
     fn preview(&self) -> ToolPreview {
         ToolPreview::None
+    }
+
+    fn step_hint(&self) -> Option<String> {
+        None
     }
 }

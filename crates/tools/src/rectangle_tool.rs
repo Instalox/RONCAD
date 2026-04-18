@@ -33,6 +33,7 @@ impl Tool for RectangleTool {
         match self.first_corner.take() {
             None => {
                 self.first_corner = Some(world_mm);
+                self.cursor = Some(world_mm);
                 Vec::new()
             }
             Some(first) => {
@@ -62,5 +63,12 @@ impl Tool for RectangleTool {
             },
             _ => ToolPreview::None,
         }
+    }
+
+    fn step_hint(&self) -> Option<String> {
+        Some(match self.first_corner {
+            None => "Click first corner. Shortcut: R. Esc cancels.".to_string(),
+            Some(_) => "Click opposite corner to place rectangle. Esc cancels.".to_string(),
+        })
     }
 }

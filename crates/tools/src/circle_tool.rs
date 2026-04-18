@@ -33,6 +33,7 @@ impl Tool for CircleTool {
         match self.center.take() {
             None => {
                 self.center = Some(world_mm);
+                self.cursor = Some(world_mm);
                 Vec::new()
             }
             Some(center) => {
@@ -62,5 +63,12 @@ impl Tool for CircleTool {
             },
             _ => ToolPreview::None,
         }
+    }
+
+    fn step_hint(&self) -> Option<String> {
+        Some(match self.center {
+            None => "Click center point. Shortcut: C. Esc cancels.".to_string(),
+            Some(_) => "Click rim point to set radius. Esc cancels.".to_string(),
+        })
     }
 }

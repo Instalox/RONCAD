@@ -82,6 +82,20 @@ impl Tool for DimensionTool {
             DimensionState::Locked { start, end } => ToolPreview::Measurement { start, end },
         }
     }
+
+    fn step_hint(&self) -> Option<String> {
+        Some(match self.state {
+            DimensionState::Idle => {
+                "Click first point to start measuring. Shortcut: D. Esc clears.".to_string()
+            }
+            DimensionState::Anchored { .. } => {
+                "Click second point to lock measurement. Esc clears.".to_string()
+            }
+            DimensionState::Locked { .. } => {
+                "Measurement locked. Click anywhere to start a new one. Esc clears.".to_string()
+            }
+        })
+    }
 }
 
 #[cfg(test)]
