@@ -51,8 +51,19 @@ impl Tool for CircleTool {
         }
     }
 
+    fn on_pointer_secondary_click(
+        &mut self,
+        _ctx: &ToolContext<'_>,
+        _world_mm: DVec2,
+    ) -> Vec<AppCommand> {
+        self.center = None;
+        self.cursor = None;
+        Vec::new()
+    }
+
     fn on_escape(&mut self) {
         self.center = None;
+        self.cursor = None;
     }
 
     fn preview(&self) -> ToolPreview {
@@ -67,8 +78,35 @@ impl Tool for CircleTool {
 
     fn step_hint(&self) -> Option<String> {
         Some(match self.center {
-            None => "Click center point. Shortcut: C. Esc cancels.".to_string(),
-            Some(_) => "Click rim point to set radius. Esc cancels.".to_string(),
+            None => "Click center point. Shortcut: C. Right-click or Esc cancels.".to_string(),
+            Some(_) => "Click rim point to set radius. Right-click or Esc cancels.".to_string(),
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use glam::dvec2;
+    use roncad_geometry::Project;
+
+    use super::CircleTool;
+    use crate::tool::{Tool, ToolContext, ToolPreview};
+
+    #[test]
+    fn right_click_clears_staged_circle() {
+        let project = Project::new_untitled();
+        let ctx = ToolContext {
+            active_sketch: project.active_sketch,
+            sketch: project.active_sketch(),
+            pixels_per_mm: 10.0,
+            modifiers: Default::default(),
+        };
+        let mut tool = CircleTool::default();
+
+        tool.on_pointer_click(&ctx, dvec2(1.0, 1.0));
+        tool.on_pointer_move(&ctx, dvec2(3.0, 1.0));
+        tool.on_pointer_secondary_click(&ctx, dvec2(3.0, 1.0));
+
+        assert!(matches!(tool.preview(), ToolPreview::None));
     }
 }

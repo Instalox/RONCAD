@@ -57,8 +57,19 @@ impl Tool for LineTool {
         }
     }
 
+    fn on_pointer_secondary_click(
+        &mut self,
+        _ctx: &ToolContext<'_>,
+        _world_mm: DVec2,
+    ) -> Vec<AppCommand> {
+        self.first_point = None;
+        self.cursor = None;
+        Vec::new()
+    }
+
     fn on_escape(&mut self) {
         self.first_point = None;
+        self.cursor = None;
     }
 
     fn preview(&self) -> ToolPreview {
@@ -70,8 +81,8 @@ impl Tool for LineTool {
 
     fn step_hint(&self) -> Option<String> {
         Some(match self.first_point {
-            None => "Click first point. Shortcut: L. Esc cancels.".to_string(),
-            Some(_) => "Click next point to place line. Hold Shift to lock axis. Esc cancels.".to_string(),
+            None => "Click first point. Shortcut: L. Right-click or Esc clears.".to_string(),
+            Some(_) => "Click next point to place line. Hold Shift to lock axis. Right-click or Esc ends the chain.".to_string(),
         })
     }
 }
@@ -96,7 +107,7 @@ mod tests {
     use roncad_geometry::Project;
 
     use super::LineTool;
-    use crate::tool::{Modifiers, Tool, ToolContext};
+    use crate::tool::{Modifiers, Tool, ToolContext, ToolPreview};
 
     #[test]
     fn shift_click_locks_line_to_dominant_axis() {
@@ -124,5 +135,24 @@ mod tests {
                 b: dvec2(10.0, 0.0),
             }]
         );
+    }
+
+    #[test]
+    fn right_click_ends_active_chain() {
+        let project = Project::new_untitled();
+        let sketch = project.active_sketch.expect("default sketch");
+        let ctx = ToolContext {
+            active_sketch: Some(sketch),
+            sketch: project.active_sketch(),
+            pixels_per_mm: 10.0,
+            modifiers: Modifiers::default(),
+        };
+        let mut tool = LineTool::default();
+
+        tool.on_pointer_click(&ctx, dvec2(1.0, 1.0));
+        tool.on_pointer_move(&ctx, dvec2(5.0, 2.0));
+        tool.on_pointer_secondary_click(&ctx, dvec2(5.0, 2.0));
+
+        assert!(matches!(tool.preview(), ToolPreview::None));
     }
 }

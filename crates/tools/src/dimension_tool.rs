@@ -76,6 +76,15 @@ impl Tool for DimensionTool {
         commands
     }
 
+    fn on_pointer_secondary_click(
+        &mut self,
+        _ctx: &ToolContext<'_>,
+        _world_mm: DVec2,
+    ) -> Vec<AppCommand> {
+        self.state = DimensionState::Idle;
+        Vec::new()
+    }
+
     fn on_escape(&mut self) {
         self.state = DimensionState::Idle;
     }
@@ -93,13 +102,16 @@ impl Tool for DimensionTool {
     fn step_hint(&self) -> Option<String> {
         Some(match self.state {
             DimensionState::Idle => {
-                "Click first point to create a dimension. Shortcut: D. Esc clears.".to_string()
+                "Click first point to create a dimension. Shortcut: D. Right-click or Esc clears."
+                    .to_string()
             }
             DimensionState::Anchored { .. } => {
-                "Click second point to place persistent dimension. Esc clears.".to_string()
+                "Click second point to place persistent dimension. Right-click or Esc clears."
+                    .to_string()
             }
             DimensionState::Locked => {
-                "Dimension placed. Click anywhere to start a new one. Esc clears.".to_string()
+                "Dimension placed. Click anywhere to start a new one. Right-click or Esc clears."
+                    .to_string()
             }
         })
     }
@@ -157,5 +169,23 @@ mod tests {
             ToolPreview::Measurement { start, end }
                 if start == dvec2(2.0, 2.0) && end == dvec2(2.0, 2.0)
         ));
+    }
+
+    #[test]
+    fn right_click_clears_staged_dimension() {
+        let mut tool = DimensionTool::default();
+        let project = Project::new_untitled();
+        let ctx = ToolContext {
+            active_sketch: project.active_sketch,
+            sketch: project.active_sketch(),
+            pixels_per_mm: 10.0,
+            modifiers: Default::default(),
+        };
+
+        tool.on_pointer_click(&ctx, dvec2(0.0, 0.0));
+        tool.on_pointer_move(&ctx, dvec2(3.0, 4.0));
+        tool.on_pointer_secondary_click(&ctx, dvec2(3.0, 4.0));
+
+        assert!(matches!(tool.preview(), ToolPreview::None));
     }
 }

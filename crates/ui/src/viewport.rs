@@ -50,7 +50,7 @@ pub fn render(ui: &mut Ui, shell: &mut ShellContext<'_>, response: &mut ShellRes
             );
             snap_overlay::paint(ui.painter(), rect, shell.camera, shell.snap_result.as_ref());
             tool_overlay::paint_preview(ui.painter(), rect, shell.camera, shell.tool_manager);
-            hud_overlay::paint(ui, rect, shell);
+            hud_overlay::paint(ui, rect, shell, hovered_entity);
         });
 }
 
@@ -104,6 +104,16 @@ fn handle_input(
             let world = active_snap_result(raw_world, active_kind, shell.snap_engine, &ctx)
                 .map_or(raw_world, |snap| snap.point);
             let cmds = shell.tool_manager.on_pointer_click(&ctx, world);
+            response.commands.extend(cmds);
+        }
+    }
+
+    if resp.clicked_by(PointerButton::Secondary) {
+        if let Some(p) = resp.interact_pointer_pos() {
+            let raw_world = shell.camera.screen_to_world(pos_to_dvec(p), center);
+            let world = active_snap_result(raw_world, active_kind, shell.snap_engine, &ctx)
+                .map_or(raw_world, |snap| snap.point);
+            let cmds = shell.tool_manager.on_pointer_secondary_click(&ctx, world);
             response.commands.extend(cmds);
         }
     }

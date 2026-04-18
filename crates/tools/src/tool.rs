@@ -36,10 +36,12 @@ impl ActiveToolKind {
         match self {
             Self::Select => "Click to select. Ctrl/Shift-click toggles. Del deletes selection.",
             Self::Pan => "Drag to pan the viewport.",
-            Self::Line => "Click two points. Esc to cancel.",
-            Self::Rectangle => "Click two opposite corners. Esc to cancel.",
-            Self::Circle => "Click the center, then a point on the rim.",
-            Self::Dimension => "Pick two points to dimension.",
+            Self::Line => "Click points to chain lines. Right-click or Esc ends the chain.",
+            Self::Rectangle => {
+                "Click two opposite corners. Hold Shift to lock square. Right-click or Esc cancels."
+            }
+            Self::Circle => "Click center, then rim. Right-click or Esc cancels.",
+            Self::Dimension => "Pick two points to dimension. Right-click or Esc clears.",
             Self::Extrude => "Pick a closed profile to extrude.",
         }
     }
@@ -86,6 +88,14 @@ pub trait Tool: Send {
     fn on_pointer_move(&mut self, _ctx: &ToolContext<'_>, _world_mm: DVec2) {}
 
     fn on_pointer_click(
+        &mut self,
+        _ctx: &ToolContext<'_>,
+        _world_mm: DVec2,
+    ) -> Vec<AppCommand> {
+        Vec::new()
+    }
+
+    fn on_pointer_secondary_click(
         &mut self,
         _ctx: &ToolContext<'_>,
         _world_mm: DVec2,

@@ -55,6 +55,14 @@ impl ToolManager {
         self.tool.on_pointer_click(ctx, world_mm)
     }
 
+    pub fn on_pointer_secondary_click(
+        &mut self,
+        ctx: &ToolContext,
+        world_mm: DVec2,
+    ) -> Vec<AppCommand> {
+        self.tool.on_pointer_secondary_click(ctx, world_mm)
+    }
+
     pub fn on_escape(&mut self) {
         self.tool.on_escape();
     }

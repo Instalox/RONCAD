@@ -3,6 +3,7 @@
 
 use egui::{Align2, Color32, Vec2};
 use glam::DVec2;
+use roncad_core::ids::{SketchEntityId, SketchId};
 use roncad_core::selection::{Selection, SelectionItem};
 use roncad_geometry::{Project, SketchDimension, SketchEntity};
 
@@ -71,6 +72,36 @@ pub(crate) fn active_sketch_dimension_annotations(
         .iter_dimensions()
         .map(|(_, dimension)| describe_sketch_dimension_annotation(dimension))
         .collect()
+}
+
+pub(crate) fn hovered_entity_summary(
+    project: &Project,
+    hovered: Option<(SketchId, SketchEntityId)>,
+) -> Option<String> {
+    let (sketch_id, entity_id) = hovered?;
+    let sketch = project.sketches.get(sketch_id)?;
+    let entity = sketch.entities.get(entity_id)?;
+
+    Some(match entity {
+        SketchEntity::Point { p } => {
+            format!("Hover Point   X {}   Y {}", format_value(p.x), format_value(p.y))
+        }
+        SketchEntity::Line { a, b } => {
+            format!("Hover Line   L {}", format_mm(a.distance(*b)))
+        }
+        SketchEntity::Rectangle { corner_a, corner_b } => {
+            let min = corner_a.min(*corner_b);
+            let max = corner_a.max(*corner_b);
+            format!(
+                "Hover Rectangle   W {}   H {}",
+                format_mm((max.x - min.x).abs()),
+                format_mm((max.y - min.y).abs()),
+            )
+        }
+        SketchEntity::Circle { radius, .. } => {
+            format!("Hover Circle   R {}", format_mm(*radius))
+        }
+    })
 }
 
 fn describe_entity(entity: &SketchEntity) -> EntityDimensions {
@@ -219,7 +250,10 @@ mod tests {
     use roncad_core::selection::{Selection, SelectionItem};
     use roncad_geometry::{Project, SketchDimension, SketchEntity};
 
-    use super::{active_sketch_dimension_annotations, selected_entity_dimensions};
+    use super::{
+        active_sketch_dimension_annotations, hovered_entity_summary,
+        selected_entity_dimensions,
+    };
     use crate::theme::ThemeColors;
 
     #[test]
@@ -287,5 +321,25 @@ mod tests {
         assert_eq!(annotations.len(), 1);
         assert_eq!(annotations[0].text, "7.500");
         assert_eq!(annotations[0].color, ThemeColors::ACCENT_AMBER);
+    }
+
+    #[test]
+    fn hovered_rectangle_reports_compact_summary() {
+        let mut project = Project::new_untitled();
+        let sketch = project.active_sketch.expect("default sketch");
+        let entity = project
+            .active_sketch_mut()
+            .expect("active sketch")
+            .add(SketchEntity::Rectangle {
+                corner_a: dvec2(2.0, 3.0),
+                corner_b: dvec2(12.0, 9.0),
+            });
+
+        let summary = hovered_entity_summary(&project, Some((sketch, entity)));
+
+        assert_eq!(
+            summary.as_deref(),
+            Some("Hover Rectangle   W 10.000 mm   H 6.000 mm")
+        );
     }
 }
