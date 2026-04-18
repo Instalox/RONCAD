@@ -15,6 +15,13 @@ pub fn apply(
             if let Some(plane_id) = project.workplanes.keys().next() {
                 let id = project.sketches.insert(Sketch::new(name, plane_id));
                 project.active_sketch = Some(id);
+                selection.clear();
+            }
+        }
+        AppCommand::SetActiveSketch(id) => {
+            if project.sketches.contains_key(*id) {
+                project.active_sketch = Some(*id);
+                selection.clear();
             }
         }
         AppCommand::DeleteSketch(id) => {
@@ -118,7 +125,7 @@ pub fn apply(
 mod tests {
     use glam::dvec2;
     use roncad_core::selection::SelectionItem;
-    use roncad_geometry::Project;
+    use roncad_geometry::{Project, Sketch};
 
     use super::apply;
     use roncad_core::command::AppCommand;
@@ -173,5 +180,24 @@ mod tests {
                 .entities
                 .contains_key(entity)
         );
+    }
+
+    #[test]
+    fn set_active_sketch_switches_context_and_clears_selection() {
+        let mut project = Project::new_untitled();
+        let mut selection = Selection::default();
+        let first = project.active_sketch.expect("default project has sketch");
+        let plane = project.workplanes.keys().next().expect("default plane");
+        let second = project.sketches.insert(Sketch::new("Sketch 2", plane));
+        selection.insert(SelectionItem::Sketch(first));
+
+        apply(
+            &mut project,
+            &mut selection,
+            &AppCommand::SetActiveSketch(second),
+        );
+
+        assert_eq!(project.active_sketch, Some(second));
+        assert!(selection.is_empty());
     }
 }

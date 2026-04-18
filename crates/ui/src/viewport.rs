@@ -22,7 +22,6 @@ use crate::shell::{ShellContext, ShellResponse};
 use crate::theme::ThemeColors;
 
 const COLOR_SKETCH: Color32 = Color32::from_rgb(0xE0, 0xE4, 0xEA);
-const COLOR_PREVIEW: Color32 = Color32::from_rgb(0x4F, 0xA3, 0xF7);
 
 pub fn render(ui: &mut Ui, shell: &mut ShellContext<'_>, response: &mut ShellResponse) {
     CentralPanel::default()

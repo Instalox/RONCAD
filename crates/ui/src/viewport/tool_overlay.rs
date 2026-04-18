@@ -3,7 +3,8 @@ use glam::DVec2;
 use roncad_rendering::Camera2d;
 use roncad_tools::{ToolManager, ToolPreview};
 
-use super::{screen_center, to_pos, COLOR_PREVIEW};
+use super::{screen_center, to_pos};
+use crate::theme::ThemeColors;
 
 pub(super) fn paint_preview(
     painter: &egui::Painter,
@@ -12,7 +13,8 @@ pub(super) fn paint_preview(
     manager: &ToolManager,
 ) {
     let center = screen_center(rect);
-    let stroke = Stroke::new(1.4, COLOR_PREVIEW);
+    let preview_color = ThemeColors::tool_accent(manager.active_kind());
+    let stroke = Stroke::new(1.4, preview_color);
     match manager.preview() {
         ToolPreview::None => {}
         ToolPreview::Line { start, end } => {
@@ -41,7 +43,7 @@ pub(super) fn paint_preview(
             let shadow = midpoint + egui::vec2(1.0, 1.0);
             let font = FontId::monospace(11.0);
             painter.text(shadow, Align2::CENTER_BOTTOM, &label, font.clone(), egui::Color32::BLACK);
-            painter.text(midpoint, Align2::CENTER_BOTTOM, label, font, COLOR_PREVIEW);
+            painter.text(midpoint, Align2::CENTER_BOTTOM, label, font, preview_color);
         }
     }
 }

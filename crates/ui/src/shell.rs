@@ -8,7 +8,7 @@ use roncad_geometry::Project;
 use roncad_rendering::Camera2d;
 use roncad_tools::{SnapEngine, SnapResult, ToolManager};
 
-use crate::{inspector, project_tree, status_bar, tool_shelf, toolbar, viewport};
+use crate::{right_sidebar, status_bar, tool_shelf, toolbar, viewport};
 
 pub struct ShellContext<'a> {
     pub tool_manager: &'a mut ToolManager,
@@ -31,8 +31,7 @@ pub fn render_shell(ui: &mut Ui, shell: &mut ShellContext<'_>) -> ShellResponse 
 
     toolbar::render(ui, shell, &mut response);
     tool_shelf::render(ui, shell, &mut response);
-    project_tree::render(ui, shell, &mut response);
-    inspector::render(ui, shell, &mut response);
+    right_sidebar::render(ui, shell, &mut response);
     status_bar::render(ui, shell, &mut response);
     viewport::render(ui, shell, &mut response);
 

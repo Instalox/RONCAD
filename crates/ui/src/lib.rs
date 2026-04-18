@@ -5,6 +5,7 @@ mod dimensions;
 
 pub mod inspector;
 pub mod project_tree;
+pub mod right_sidebar;
 pub mod shell;
 pub mod status_bar;
 pub mod theme;

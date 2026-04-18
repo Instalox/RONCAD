@@ -13,6 +13,7 @@ pub enum AppCommand {
     CreateSketch {
         name: String,
     },
+    SetActiveSketch(SketchId),
     DeleteSketch(SketchId),
     AddLine {
         sketch: SketchId,

@@ -12,6 +12,11 @@ pub fn render(ui: &mut Ui, shell: &ShellContext<'_>, _response: &mut ShellRespon
         .show_inside(ui, |ui| {
             ui.horizontal_centered(|ui| {
                 ui.add_space(6.0);
+                let kind = shell.tool_manager.active_kind();
+                ui.colored_label(ThemeColors::TEXT_DIM, "Mode");
+                ui.colored_label(ThemeColors::tool_accent(kind), kind.label());
+
+                ui.separator();
                 match shell.cursor_world_mm.as_ref() {
                     Some(p) => ui.colored_label(
                         ThemeColors::TEXT,
@@ -35,21 +40,19 @@ pub fn render(ui: &mut Ui, shell: &ShellContext<'_>, _response: &mut ShellRespon
                 }
 
                 ui.separator();
-                let kind = shell.tool_manager.active_kind();
                 ui.colored_label(ThemeColors::TEXT_DIM, kind.hint());
 
                 if let ToolPreview::Measurement { start, end } = shell.tool_manager.preview() {
                     ui.separator();
                     ui.colored_label(
-                        ThemeColors::ACCENT,
+                        ThemeColors::tool_accent(kind),
                         format!("Measure {:.3} mm", start.distance(end)),
                     );
                 }
 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.add_space(6.0);
-                    ui.colored_label(ThemeColors::ACCENT, kind.label());
-                    ui.colored_label(ThemeColors::TEXT_DIM, "Tool:");
+                    ui.colored_label(ThemeColors::TEXT_DIM, format!("Zoom {:.2} px/mm", shell.camera.pixels_per_mm));
                 });
             });
         });

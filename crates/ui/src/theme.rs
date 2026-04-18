@@ -2,6 +2,7 @@
 //! Applied once at startup via egui::Context::set_visuals.
 
 use egui::{Color32, Context, CornerRadius, FontDefinitions, Stroke, Visuals};
+use roncad_tools::ActiveToolKind;
 
 pub struct ThemeColors;
 
@@ -9,6 +10,8 @@ impl ThemeColors {
     pub const BG_DEEP: Color32 = Color32::from_rgb(0x14, 0x16, 0x1A);
     pub const BG_PANEL: Color32 = Color32::from_rgb(0x1B, 0x1E, 0x24);
     pub const BG_PANEL_ALT: Color32 = Color32::from_rgb(0x21, 0x25, 0x2C);
+    pub const BG_HEADER: Color32 = Color32::from_rgb(0x20, 0x24, 0x2B);
+    pub const BG_HEADER_ACTIVE: Color32 = Color32::from_rgb(0x26, 0x2B, 0x34);
     pub const BG_HOVER: Color32 = Color32::from_rgb(0x2A, 0x2F, 0x38);
     pub const BG_ACTIVE: Color32 = Color32::from_rgb(0x34, 0x3A, 0x45);
     pub const SEPARATOR: Color32 = Color32::from_rgb(0x2C, 0x30, 0x38);
@@ -16,10 +19,26 @@ impl ThemeColors {
     pub const TEXT_DIM: Color32 = Color32::from_rgb(0x8A, 0x91, 0x9C);
     pub const ACCENT: Color32 = Color32::from_rgb(0x4F, 0xA3, 0xF7);
     pub const ACCENT_DIM: Color32 = Color32::from_rgb(0x2C, 0x5E, 0x93);
+    pub const ACCENT_AMBER: Color32 = Color32::from_rgb(0xE2, 0xA2, 0x46);
+    pub const ACCENT_AMBER_DIM: Color32 = Color32::from_rgb(0x7C, 0x56, 0x22);
     pub const GRID_MAJOR: Color32 = Color32::from_rgb(0x2F, 0x35, 0x3F);
     pub const GRID_MINOR: Color32 = Color32::from_rgb(0x22, 0x26, 0x2D);
     pub const GRID_AXIS_X: Color32 = Color32::from_rgb(0xD0, 0x4B, 0x4B);
     pub const GRID_AXIS_Y: Color32 = Color32::from_rgb(0x4B, 0xC0, 0x6B);
+
+    pub fn tool_accent(tool: ActiveToolKind) -> Color32 {
+        match tool {
+            ActiveToolKind::Dimension => Self::ACCENT_AMBER,
+            _ => Self::ACCENT,
+        }
+    }
+
+    pub fn tool_accent_dim(tool: ActiveToolKind) -> Color32 {
+        match tool {
+            ActiveToolKind::Dimension => Self::ACCENT_AMBER_DIM,
+            _ => Self::ACCENT_DIM,
+        }
+    }
 }
 
 pub fn apply_dark_theme(ctx: &Context) {
@@ -54,20 +73,20 @@ pub fn apply_dark_theme(ctx: &Context) {
     visuals.widgets.active.bg_stroke = Stroke::new(1.0, ThemeColors::ACCENT);
     visuals.widgets.active.fg_stroke = Stroke::new(1.0, ThemeColors::TEXT);
 
-    let radius = CornerRadius::same(3);
+    let radius = CornerRadius::same(2);
     visuals.widgets.noninteractive.corner_radius = radius;
     visuals.widgets.inactive.corner_radius = radius;
     visuals.widgets.hovered.corner_radius = radius;
     visuals.widgets.active.corner_radius = radius;
-    visuals.window_corner_radius = CornerRadius::same(4);
-    visuals.menu_corner_radius = CornerRadius::same(4);
+    visuals.window_corner_radius = CornerRadius::same(3);
+    visuals.menu_corner_radius = CornerRadius::same(3);
 
     ctx.set_visuals(visuals);
 
     let mut style = (*ctx.global_style()).clone();
-    style.spacing.item_spacing = egui::vec2(6.0, 4.0);
-    style.spacing.button_padding = egui::vec2(8.0, 4.0);
-    style.spacing.window_margin = egui::Margin::same(8);
+    style.spacing.item_spacing = egui::vec2(5.0, 3.0);
+    style.spacing.button_padding = egui::vec2(6.0, 3.0);
+    style.spacing.window_margin = egui::Margin::same(6);
     ctx.set_global_style(style);
 }
 
