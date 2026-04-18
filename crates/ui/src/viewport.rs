@@ -185,7 +185,10 @@ fn hovered_selectable_entity(
 fn tool_uses_snap(kind: ActiveToolKind) -> bool {
     matches!(
         kind,
-        ActiveToolKind::Line | ActiveToolKind::Rectangle | ActiveToolKind::Circle
+        ActiveToolKind::Line
+            | ActiveToolKind::Rectangle
+            | ActiveToolKind::Circle
+            | ActiveToolKind::Dimension
     )
 }
 

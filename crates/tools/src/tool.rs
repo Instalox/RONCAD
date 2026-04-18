@@ -66,6 +66,7 @@ pub enum ToolPreview {
     Line { start: DVec2, end: DVec2 },
     Rectangle { corner_a: DVec2, corner_b: DVec2 },
     Circle { center: DVec2, radius: f64 },
+    Measurement { start: DVec2, end: DVec2 },
 }
 
 pub trait Tool: Send {

@@ -1,6 +1,7 @@
 //! Bottom status bar: coordinates, zoom level, active-tool hint.
 
 use egui::{Panel, Ui};
+use roncad_tools::ToolPreview;
 
 use crate::shell::{ShellContext, ShellResponse};
 use crate::theme::ThemeColors;
@@ -36,6 +37,14 @@ pub fn render(ui: &mut Ui, shell: &ShellContext<'_>, _response: &mut ShellRespon
                 ui.separator();
                 let kind = shell.tool_manager.active_kind();
                 ui.colored_label(ThemeColors::TEXT_DIM, kind.hint());
+
+                if let ToolPreview::Measurement { start, end } = shell.tool_manager.preview() {
+                    ui.separator();
+                    ui.colored_label(
+                        ThemeColors::ACCENT,
+                        format!("Measure {:.3} mm", start.distance(end)),
+                    );
+                }
 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.add_space(6.0);

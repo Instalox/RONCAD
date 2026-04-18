@@ -2,6 +2,7 @@
 //! Each tool is a module that plugs in via the common Tool contract.
 
 pub mod circle_tool;
+pub mod dimension_tool;
 pub mod line_tool;
 pub mod manager;
 pub mod rectangle_tool;
