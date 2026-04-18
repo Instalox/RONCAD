@@ -23,18 +23,12 @@ pub(super) fn paint_preview(
             painter.line_segment([sa, sb], stroke);
             paint_point_marker(painter, sa, stroke);
             paint_point_marker(painter, sb, stroke);
-            let delta = end - start;
-            let label = format!(
-                "L {} mm\ndX {}   dY {}",
-                format_length_mm(start.distance(end)),
-                format_length_mm(delta.x.abs()),
-                format_length_mm(delta.y.abs())
-            );
+            let (anchor, align) = line_label_placement(sa, sb);
             paint_label(
                 painter,
-                Pos2::new((sa.x + sb.x) * 0.5, (sa.y + sb.y) * 0.5),
-                Align2::CENTER_BOTTOM,
-                &label,
+                anchor,
+                align,
+                &format!("L {} mm", format_length_mm(start.distance(end))),
                 preview_color,
             );
         }
@@ -89,10 +83,11 @@ pub(super) fn paint_preview(
             painter.line_segment([sa, sb], stroke);
             paint_point_marker(painter, sa, stroke);
             paint_point_marker(painter, sb, stroke);
+            let (anchor, align) = line_label_placement(sa, sb);
             paint_label(
                 painter,
-                Pos2::new((sa.x + sb.x) * 0.5, (sa.y + sb.y) * 0.5),
-                Align2::CENTER_BOTTOM,
+                anchor,
+                align,
                 &format!("{} mm", format_length_mm(start.distance(end))),
                 preview_color,
             );
@@ -125,6 +120,30 @@ fn format_length_mm(length_mm: f64) -> String {
     format!("{length_mm:.3}")
 }
 
+fn line_label_placement(start: Pos2, end: Pos2) -> (Pos2, Align2) {
+    let delta = end - start;
+    let midpoint = start + delta * 0.5;
+    if delta.length_sq() <= f32::EPSILON {
+        return (midpoint + egui::vec2(0.0, -18.0), Align2::CENTER_BOTTOM);
+    }
+
+    let len = delta.length();
+    let mut normal = egui::vec2(-delta.y / len, delta.x / len);
+    if normal.y > 0.0 || (normal.y.abs() < 0.15 && normal.x > 0.0) {
+        normal = -normal;
+    }
+
+    let anchor = midpoint + normal * 18.0;
+    let align = if normal.y <= -0.4 {
+        Align2::CENTER_BOTTOM
+    } else if normal.x < 0.0 {
+        Align2::RIGHT_CENTER
+    } else {
+        Align2::LEFT_CENTER
+    };
+    (anchor, align)
+}
+
 fn paint_point_marker(painter: &egui::Painter, point: Pos2, stroke: Stroke) {
     painter.circle_stroke(point, 3.0, stroke);
     painter.circle_filled(point, 1.5, stroke.color);
@@ -141,4 +160,35 @@ fn paint_label(
     let font = FontId::monospace(11.0);
     painter.text(shadow, align, text, font.clone(), egui::Color32::BLACK);
     painter.text(anchor, align, text, font, color);
+}
+
+#[cfg(test)]
+mod tests {
+    use egui::{Align2, Pos2};
+
+    use super::line_label_placement;
+
+    #[test]
+    fn shallow_line_label_sits_above_segment() {
+        let start = Pos2::new(20.0, 40.0);
+        let end = Pos2::new(80.0, 55.0);
+        let midpoint = Pos2::new(50.0, 47.5);
+
+        let (anchor, align) = line_label_placement(start, end);
+
+        assert!(anchor.y < midpoint.y);
+        assert_eq!(align, Align2::CENTER_BOTTOM);
+    }
+
+    #[test]
+    fn vertical_line_label_sits_left_of_segment() {
+        let start = Pos2::new(64.0, 20.0);
+        let end = Pos2::new(64.0, 80.0);
+        let midpoint = Pos2::new(64.0, 50.0);
+
+        let (anchor, align) = line_label_placement(start, end);
+
+        assert!(anchor.x < midpoint.x);
+        assert_eq!(align, Align2::RIGHT_CENTER);
+    }
 }

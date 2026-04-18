@@ -11,7 +11,7 @@ pub mod snapping;
 pub mod tool;
 
 pub use manager::ToolManager;
-pub use snapping::{SnapEngine, SnapKind, SnapResult};
+pub use snapping::{SnapAxis, SnapEngine, SnapKind, SnapReference, SnapResult};
 pub use tool::{
     ActiveToolKind, Modifiers, Tool, ToolContext, ToolPreview, ENTITY_PICK_RADIUS_PX,
 };

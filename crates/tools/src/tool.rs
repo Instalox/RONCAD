@@ -42,7 +42,7 @@ impl ActiveToolKind {
             }
             Self::Circle => "Click center, then rim. Right-click or Esc cancels.",
             Self::Dimension => "Pick two points to dimension. Right-click or Esc clears.",
-            Self::Extrude => "Pick a closed profile to extrude.",
+            Self::Extrude => "Hover a closed profile to preview extrusion target.",
         }
     }
 
@@ -53,7 +53,8 @@ impl ActiveToolKind {
             Self::Rectangle => Some("R"),
             Self::Circle => Some("C"),
             Self::Dimension => Some("D"),
-            Self::Pan | Self::Extrude => None,
+            Self::Extrude => Some("E"),
+            Self::Pan => None,
         }
     }
 }

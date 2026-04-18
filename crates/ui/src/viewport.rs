@@ -5,6 +5,7 @@
 mod dimension_overlay;
 mod grid_overlay;
 mod hud_overlay;
+mod profile_overlay;
 mod sketch_overlay;
 mod snap_overlay;
 mod tool_overlay;
@@ -13,7 +14,7 @@ use egui::{CentralPanel, Color32, Frame, Key, PointerButton, Pos2, Rect, Sense, 
 use glam::DVec2;
 use roncad_core::command::AppCommand;
 use roncad_core::ids::{SketchEntityId, SketchId};
-use roncad_geometry::pick_entity;
+use roncad_geometry::{SketchProfile, pick_closed_profile, pick_entity};
 use roncad_tools::{
     ActiveToolKind, Modifiers, SnapEngine, SnapResult, ToolContext, ENTITY_PICK_RADIUS_PX,
 };
@@ -31,7 +32,8 @@ pub fn render(ui: &mut Ui, shell: &mut ShellContext<'_>, response: &mut ShellRes
             let (rect, resp) =
                 ui.allocate_exact_size(available, Sense::click_and_drag());
 
-            let hovered_entity = handle_input(ui, &resp, shell, rect, response);
+            let (hovered_entity, hovered_profile) =
+                handle_input(ui, &resp, shell, rect, response);
             grid_overlay::paint(ui.painter(), rect, shell.camera);
             sketch_overlay::paint(
                 ui.painter(),
@@ -48,6 +50,7 @@ pub fn render(ui: &mut Ui, shell: &mut ShellContext<'_>, response: &mut ShellRes
                 shell.project,
                 shell.selection,
             );
+            profile_overlay::paint(ui.painter(), rect, shell.camera, hovered_profile.as_ref());
             snap_overlay::paint(ui.painter(), rect, shell.camera, shell.snap_result.as_ref());
             tool_overlay::paint_preview(ui.painter(), rect, shell.camera, shell.tool_manager);
             hud_overlay::paint(ui, rect, shell, hovered_entity);
@@ -60,7 +63,7 @@ fn handle_input(
     shell: &mut ShellContext<'_>,
     rect: Rect,
     response: &mut ShellResponse,
-) -> Option<(SketchId, SketchEntityId)> {
+) -> (Option<(SketchId, SketchEntityId)>, Option<SketchProfile>) {
     let center = screen_center(rect);
     if resp.clicked() {
         resp.request_focus();
@@ -85,6 +88,7 @@ fn handle_input(
         modifiers,
     };
     let hovered_entity = hovered_selectable_entity(raw_cursor_world, active_kind, &ctx);
+    let hovered_profile = hovered_closed_profile(raw_cursor_world, active_kind, &ctx);
     let snap_result = raw_cursor_world.and_then(|world| {
         active_snap_result(world, active_kind, shell.snap_engine, &ctx)
     });
@@ -147,7 +151,7 @@ fn handle_input(
         }
     }
 
-    hovered_entity
+    (hovered_entity, hovered_profile)
 }
 
 fn pick_step(pixels_per_mm: f64, min_px: f64) -> f64 {
@@ -192,6 +196,20 @@ fn hovered_selectable_entity(
     pick_entity(sketch, world, tolerance_mm).map(|entity| (sketch_id, entity))
 }
 
+fn hovered_closed_profile(
+    raw_world: Option<DVec2>,
+    active_kind: ActiveToolKind,
+    ctx: &ToolContext<'_>,
+) -> Option<SketchProfile> {
+    if active_kind != ActiveToolKind::Extrude {
+        return None;
+    }
+
+    let sketch = ctx.sketch?;
+    let world = raw_world?;
+    pick_closed_profile(sketch, world)
+}
+
 fn tool_uses_snap(kind: ActiveToolKind) -> bool {
     matches!(
         kind,
@@ -221,6 +239,8 @@ fn handle_tool_shortcuts(ui: &Ui, manager: &mut roncad_tools::ToolManager) {
             Some(ActiveToolKind::Circle)
         } else if i.key_pressed(Key::D) {
             Some(ActiveToolKind::Dimension)
+        } else if i.key_pressed(Key::E) {
+            Some(ActiveToolKind::Extrude)
         } else {
             None
         }

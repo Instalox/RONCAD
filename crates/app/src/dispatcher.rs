@@ -37,7 +37,21 @@ pub fn apply(
         }
         AppCommand::AddLine { sketch, a, b } => {
             if let Some(s) = project.sketches.get_mut(*sketch) {
-                s.add(SketchEntity::Line { a: *a, b: *b });
+                let result = s.add_line_with_splits(*a, *b);
+                for replacement in result.replaced {
+                    let selected_original = SelectionItem::SketchEntity {
+                        sketch: *sketch,
+                        entity: replacement.original,
+                    };
+                    if selection.remove(&selected_original) {
+                        for entity in replacement.segments {
+                            selection.insert(SelectionItem::SketchEntity {
+                                sketch: *sketch,
+                                entity,
+                            });
+                        }
+                    }
+                }
             }
         }
         AppCommand::AddRectangle { sketch, corner_a, corner_b } => {
@@ -236,5 +250,113 @@ mod tests {
             SketchDimension::Distance { start, end }
                 if *start == dvec2(1.0, 2.0) && *end == dvec2(6.0, 2.0)
         ));
+    }
+
+    #[test]
+    fn add_line_splits_crossing_lines_into_four_entities() {
+        let mut project = Project::new_untitled();
+        let mut selection = Selection::default();
+        let sketch = project.active_sketch.expect("default project has sketch");
+
+        apply(
+            &mut project,
+            &mut selection,
+            &AppCommand::AddLine {
+                sketch,
+                a: dvec2(0.0, 0.0),
+                b: dvec2(10.0, 10.0),
+            },
+        );
+        apply(
+            &mut project,
+            &mut selection,
+            &AppCommand::AddLine {
+                sketch,
+                a: dvec2(0.0, 10.0),
+                b: dvec2(10.0, 0.0),
+            },
+        );
+
+        let lines: Vec<_> = project
+            .active_sketch()
+            .expect("active sketch")
+            .iter()
+            .filter_map(|(_, entity)| match entity {
+                SketchEntity::Line { a, b } => Some((*a, *b)),
+                _ => None,
+            })
+            .collect();
+
+        assert_eq!(lines.len(), 4);
+        assert!(contains_line(&lines, dvec2(0.0, 0.0), dvec2(5.0, 5.0)));
+        assert!(contains_line(&lines, dvec2(5.0, 5.0), dvec2(10.0, 10.0)));
+        assert!(contains_line(&lines, dvec2(0.0, 10.0), dvec2(5.0, 5.0)));
+        assert!(contains_line(&lines, dvec2(5.0, 5.0), dvec2(10.0, 0.0)));
+    }
+
+    #[test]
+    fn split_line_replaces_existing_selection_with_new_segments() {
+        let mut project = Project::new_untitled();
+        let mut selection = Selection::default();
+        let sketch = project.active_sketch.expect("default project has sketch");
+        let original = project
+            .active_sketch_mut()
+            .expect("active sketch")
+            .add(SketchEntity::Line {
+                a: dvec2(0.0, 0.0),
+                b: dvec2(10.0, 0.0),
+            });
+        selection.insert(SelectionItem::SketchEntity {
+            sketch,
+            entity: original,
+        });
+
+        apply(
+            &mut project,
+            &mut selection,
+            &AppCommand::AddLine {
+                sketch,
+                a: dvec2(5.0, -4.0),
+                b: dvec2(5.0, 4.0),
+            },
+        );
+
+        let selected_lines: Vec<_> = selection
+            .iter()
+            .filter_map(|item| match item {
+                SelectionItem::SketchEntity { sketch: selected_sketch, entity }
+                    if *selected_sketch == sketch =>
+                {
+                    match project
+                        .active_sketch()
+                        .expect("active sketch")
+                        .entities
+                        .get(*entity)
+                    {
+                        Some(SketchEntity::Line { a, b }) => Some((*a, *b)),
+                        _ => None,
+                    }
+                }
+                _ => None,
+            })
+            .collect();
+
+        assert_eq!(selected_lines.len(), 2);
+        assert!(contains_line(
+            &selected_lines,
+            dvec2(0.0, 0.0),
+            dvec2(5.0, 0.0)
+        ));
+        assert!(contains_line(
+            &selected_lines,
+            dvec2(5.0, 0.0),
+            dvec2(10.0, 0.0)
+        ));
+    }
+
+    fn contains_line(lines: &[(glam::DVec2, glam::DVec2)], a: glam::DVec2, b: glam::DVec2) -> bool {
+        lines.iter().any(|(line_a, line_b)| {
+            (*line_a == a && *line_b == b) || (*line_a == b && *line_b == a)
+        })
     }
 }
