@@ -11,8 +11,8 @@ use crate::tool::{DynamicField, Tool, ToolContext, ToolPreview};
 /// appends keystrokes to the active buffer; Tab cycles; Enter commits.
 #[derive(Debug, Default, Clone)]
 pub struct DynamicInputState {
-    pub buffers: Vec<String>,
-    pub active: usize,
+    buffers: Vec<String>,
+    active: usize,
 }
 
 impl DynamicInputState {
@@ -48,8 +48,12 @@ impl DynamicInputState {
         self.buffers.iter().any(|buffer| !buffer.trim().is_empty())
     }
 
-    pub fn active_buffer_mut(&mut self) -> Option<&mut String> {
-        self.buffers.get_mut(self.active)
+    pub fn active_index(&self) -> usize {
+        self.active
+    }
+
+    pub fn buffer_text(&self, index: usize) -> Option<&str> {
+        self.buffers.get(index).map(String::as_str)
     }
 
     pub fn clear_active_buffer(&mut self) -> bool {
@@ -61,6 +65,26 @@ impl DynamicInputState {
         }
         buffer.clear();
         true
+    }
+
+    pub fn append_typed_chars<I>(&mut self, chars: I)
+    where
+        I: IntoIterator<Item = char>,
+    {
+        let Some(buffer) = self.buffers.get_mut(self.active) else {
+            return;
+        };
+
+        for ch in chars {
+            append_typed_char(buffer, ch);
+        }
+    }
+
+    pub fn backspace_active(&mut self) -> bool {
+        let Some(buffer) = self.buffers.get_mut(self.active) else {
+            return false;
+        };
+        buffer.pop().is_some()
     }
 
     pub fn preview_for(&self, tool: &dyn Tool) -> ToolPreview {
@@ -207,6 +231,23 @@ fn format_dynamic_value(field: &DynamicField, value: f64) -> String {
     }
 }
 
+fn append_typed_char(buffer: &mut String, ch: char) {
+    match ch {
+        '0'..='9' => buffer.push(ch),
+        '.' => {
+            if !buffer.contains('.') {
+                buffer.push('.');
+            }
+        }
+        '-' => {
+            if buffer.is_empty() {
+                buffer.push('-');
+            }
+        }
+        _ => {}
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use glam::dvec2;
@@ -233,7 +274,7 @@ mod tests {
         assert!(tool.on_pointer_click(&ctx, dvec2(0.0, 0.0)).is_empty());
         tool.on_pointer_move(&ctx, dvec2(3.0, 0.0));
         state.sync(2);
-        state.buffers[0] = "5".to_string();
+        state.append_typed_chars("5".chars());
 
         let commands = state.commit_if_valid(&mut tool, &ctx, dvec2(3.0, 0.0));
 
@@ -276,14 +317,40 @@ mod tests {
 
     #[test]
     fn cycle_back_wraps_to_last_field() {
-        let mut state = DynamicInputState {
-            buffers: vec![String::new(), String::new(), String::new()],
-            active: 0,
-        };
+        let mut state = DynamicInputState::default();
+        state.sync(3);
 
         state.cycle_back();
-        assert_eq!(state.active, 2);
+        assert_eq!(state.active_index(), 2);
         state.cycle_back();
-        assert_eq!(state.active, 1);
+        assert_eq!(state.active_index(), 1);
+    }
+
+    #[test]
+    fn append_typed_chars_accepts_single_decimal_and_leading_minus() {
+        let mut state = DynamicInputState::default();
+        state.sync(1);
+        state.append_typed_chars(['-', '1', '2', '.', '5', '.', '-']);
+
+        assert_eq!(state.buffer_text(0), Some("-12.5"));
+    }
+
+    #[test]
+    fn append_typed_chars_ignores_non_numeric_input() {
+        let mut state = DynamicInputState::default();
+        state.sync(1);
+        state.append_typed_chars(['x', '3', ' ', '+', '4']);
+
+        assert_eq!(state.buffer_text(0), Some("34"));
+    }
+
+    #[test]
+    fn backspace_active_removes_last_character() {
+        let mut state = DynamicInputState::default();
+        state.sync(1);
+        state.append_typed_chars("12".chars());
+
+        assert!(state.backspace_active());
+        assert_eq!(state.buffer_text(0), Some("1"));
     }
 }

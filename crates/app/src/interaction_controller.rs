@@ -172,12 +172,9 @@ fn handle_dynamic_input(
     ctx: &ToolContext<'_>,
     response: &mut ShellResponse,
 ) {
-    let fields = shell.tool_manager.dynamic_fields();
-    if fields.is_empty() {
-        shell.tool_manager.dynamic_input_mut().clear();
+    if !shell.tool_manager.prepare_dynamic_input() {
         return;
     }
-    shell.tool_manager.dynamic_input_mut().sync(fields.len());
 
     // If a TextEdit (e.g., the selection mini HUD) owns the keyboard, defer.
     // Note: egui_wants_keyboard_input is true for any focused widget, including
@@ -208,45 +205,21 @@ fn handle_dynamic_input(
         )
     });
 
-    {
-        let state = shell.tool_manager.dynamic_input_mut();
-        if let Some(buffer) = state.active_buffer_mut() {
-            for ch in typed_chars {
-                append_typed_char(buffer, ch);
-            }
-            if backspace {
-                buffer.pop();
-            }
-        }
+    shell.tool_manager.append_dynamic_chars(typed_chars);
+    if backspace {
+        let _ = shell.tool_manager.backspace_dynamic_input();
     }
 
     if cycle_back {
-        shell.tool_manager.dynamic_input_mut().cycle_back();
+        shell.tool_manager.cycle_dynamic_input_back();
     } else if cycle_next {
-        shell.tool_manager.dynamic_input_mut().cycle();
+        shell.tool_manager.cycle_dynamic_input();
     }
     if submit {
         if let Some(world) = cursor_world {
             let commands = shell.tool_manager.commit_dynamic(ctx, world);
             response.commands.extend(commands);
         }
-    }
-}
-
-fn append_typed_char(buffer: &mut String, ch: char) {
-    match ch {
-        '0'..='9' => buffer.push(ch),
-        '.' => {
-            if !buffer.contains('.') {
-                buffer.push('.');
-            }
-        }
-        '-' => {
-            if buffer.is_empty() {
-                buffer.push('-');
-            }
-        }
-        _ => {}
     }
 }
 
@@ -297,29 +270,4 @@ fn screen_center(rect: Rect) -> DVec2 {
 
 fn pos_to_dvec(pos: Pos2) -> DVec2 {
     DVec2::new(pos.x as f64, pos.y as f64)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::append_typed_char;
-
-    #[test]
-    fn append_typed_char_accepts_single_decimal_and_leading_minus() {
-        let mut buffer = String::new();
-        for ch in ['-', '1', '2', '.', '5', '.', '-'] {
-            append_typed_char(&mut buffer, ch);
-        }
-
-        assert_eq!(buffer, "-12.5");
-    }
-
-    #[test]
-    fn append_typed_char_ignores_non_numeric_input() {
-        let mut buffer = String::new();
-        for ch in ['x', '3', ' ', '+', '4'] {
-            append_typed_char(&mut buffer, ch);
-        }
-
-        assert_eq!(buffer, "34");
-    }
 }

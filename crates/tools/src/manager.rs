@@ -102,8 +102,33 @@ impl ToolManager {
         &self.dynamic
     }
 
-    pub fn dynamic_input_mut(&mut self) -> &mut DynamicInputState {
-        &mut self.dynamic
+    pub fn prepare_dynamic_input(&mut self) -> bool {
+        let field_count = self.dynamic_fields().len();
+        if field_count == 0 {
+            self.dynamic.clear();
+            return false;
+        }
+        self.dynamic.sync(field_count);
+        true
+    }
+
+    pub fn append_dynamic_chars<I>(&mut self, chars: I)
+    where
+        I: IntoIterator<Item = char>,
+    {
+        self.dynamic.append_typed_chars(chars);
+    }
+
+    pub fn backspace_dynamic_input(&mut self) -> bool {
+        self.dynamic.backspace_active()
+    }
+
+    pub fn cycle_dynamic_input(&mut self) {
+        self.dynamic.cycle();
+    }
+
+    pub fn cycle_dynamic_input_back(&mut self) {
+        self.dynamic.cycle_back();
     }
 
     pub fn commit_dynamic(&mut self, ctx: &ToolContext, world_mm: DVec2) -> Vec<AppCommand> {
@@ -162,8 +187,8 @@ mod tests {
 
         assert!(manager.on_pointer_click(&ctx, dvec2(0.0, 0.0)).is_empty());
         manager.on_pointer_move(&ctx, dvec2(3.0, 0.0));
-        manager.dynamic_input_mut().sync(2);
-        manager.dynamic_input_mut().buffers[0] = "5".to_string();
+        assert!(manager.prepare_dynamic_input());
+        manager.append_dynamic_chars("5".chars());
 
         let commands = manager.on_pointer_click(&ctx, dvec2(3.0, 0.0));
 
@@ -193,11 +218,11 @@ mod tests {
 
         assert!(manager.on_pointer_click(&ctx, dvec2(1.0, 1.0)).is_empty());
         manager.on_pointer_move(&ctx, dvec2(4.0, 1.0));
-        manager.dynamic_input_mut().sync(2);
-        manager.dynamic_input_mut().buffers[0] = "12".to_string();
+        assert!(manager.prepare_dynamic_input());
+        manager.append_dynamic_chars("12".chars());
 
         assert!(manager.on_escape());
-        assert_eq!(manager.dynamic_input().buffers[0], "");
+        assert_eq!(manager.dynamic_input().buffer_text(0), Some(""));
         assert!(matches!(manager.preview(), ToolPreview::Line { .. }));
 
         assert!(!manager.on_escape());
