@@ -4,6 +4,7 @@
 use glam::DVec2;
 use roncad_core::command::AppCommand;
 
+use crate::arc_tool::ArcTool;
 use crate::circle_tool::CircleTool;
 use crate::dimension_tool::DimensionTool;
 use crate::fillet_tool::FilletTool;
@@ -82,6 +83,7 @@ fn make_tool(kind: ActiveToolKind) -> Box<dyn Tool> {
         ActiveToolKind::Line => Box::new(LineTool::default()),
         ActiveToolKind::Rectangle => Box::new(RectangleTool::default()),
         ActiveToolKind::Circle => Box::new(CircleTool::default()),
+        ActiveToolKind::Arc => Box::new(ArcTool::default()),
         ActiveToolKind::Fillet => Box::new(FilletTool::default()),
         ActiveToolKind::Dimension => Box::new(DimensionTool::default()),
         ActiveToolKind::Extrude => Box::new(PassiveTool(kind)),

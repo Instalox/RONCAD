@@ -1,6 +1,7 @@
 //! Interactive editing tools: select, line, rectangle, circle, extrude, etc.
 //! Each tool is a module that plugs in via the common Tool contract.
 
+pub mod arc_tool;
 pub mod circle_tool;
 pub mod dimension_tool;
 pub mod fillet_tool;

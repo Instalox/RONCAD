@@ -207,6 +207,7 @@ fn tool_uses_snap(kind: ActiveToolKind) -> bool {
         ActiveToolKind::Line
             | ActiveToolKind::Rectangle
             | ActiveToolKind::Circle
+            | ActiveToolKind::Arc
             | ActiveToolKind::Dimension
     )
 }
@@ -222,6 +223,8 @@ fn handle_tool_shortcuts(ui: &Ui, manager: &mut roncad_tools::ToolManager) {
         }
         if i.key_pressed(Key::V) {
             Some(ActiveToolKind::Select)
+        } else if i.key_pressed(Key::A) {
+            Some(ActiveToolKind::Arc)
         } else if i.key_pressed(Key::L) {
             Some(ActiveToolKind::Line)
         } else if i.key_pressed(Key::R) {

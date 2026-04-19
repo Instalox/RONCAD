@@ -2,7 +2,7 @@ use std::f64::consts::PI;
 
 use egui::{Align2, FontId, Pos2, Rect, Stroke};
 use glam::DVec2;
-use roncad_geometry::{arc_mid_point, arc_sample_points};
+use roncad_geometry::{arc_end_point, arc_mid_point, arc_sample_points, arc_start_point};
 use roncad_rendering::Camera2d;
 use roncad_tools::{ToolManager, ToolPreview};
 
@@ -72,6 +72,57 @@ pub(super) fn paint_preview(
                     "R {} mm\nD {} mm",
                     format_length_mm(radius),
                     format_length_mm(radius * 2.0)
+                ),
+                preview_color,
+            );
+        }
+        ToolPreview::ArcRadius {
+            center: arc_center,
+            radius,
+            rim,
+        } => {
+            let center_pos = to_pos(camera.world_to_screen(arc_center, center));
+            let rim_pos = to_pos(camera.world_to_screen(rim, center));
+            painter.line_segment([center_pos, rim_pos], stroke);
+            paint_point_marker(painter, center_pos, stroke);
+            paint_point_marker(painter, rim_pos, stroke);
+            paint_label(
+                painter,
+                rim_pos,
+                Align2::LEFT_CENTER,
+                &format!("R {} mm", format_length_mm(radius)),
+                preview_color,
+            );
+        }
+        ToolPreview::Arc {
+            center: arc_center,
+            radius,
+            start_angle,
+            sweep_angle,
+        } => {
+            paint_arc_geometry(
+                painter,
+                camera,
+                center,
+                arc_center,
+                radius,
+                start_angle,
+                sweep_angle,
+                stroke,
+            );
+
+            let center_pos = to_pos(camera.world_to_screen(arc_center, center));
+            let mid_world = arc_mid_point(arc_center, radius, start_angle, sweep_angle);
+            let mid_pos = to_pos(camera.world_to_screen(mid_world, center));
+            let (anchor, align) = line_label_placement(center_pos, mid_pos);
+            paint_label(
+                painter,
+                anchor,
+                align,
+                &format!(
+                    "R {} mm\nA {:.1} deg",
+                    format_length_mm(radius),
+                    sweep_angle.abs().to_degrees()
                 ),
                 preview_color,
             );
@@ -163,6 +214,42 @@ pub(super) fn paint_preview(
     }
 }
 
+fn paint_arc_geometry(
+    painter: &egui::Painter,
+    camera: &Camera2d,
+    center: DVec2,
+    arc_center: DVec2,
+    radius: f64,
+    start_angle: f64,
+    sweep_angle: f64,
+    stroke: Stroke,
+) {
+    let start_world = arc_start_point(arc_center, radius, start_angle);
+    let end_world = arc_end_point(arc_center, radius, start_angle, sweep_angle);
+    let start_pos = to_pos(camera.world_to_screen(start_world, center));
+    let end_pos = to_pos(camera.world_to_screen(end_world, center));
+    let center_pos = to_pos(camera.world_to_screen(arc_center, center));
+
+    painter.line_segment(
+        [center_pos, start_pos],
+        Stroke::new(1.0, stroke.color.gamma_multiply(0.65)),
+    );
+    painter.line_segment(
+        [center_pos, end_pos],
+        Stroke::new(1.0, stroke.color.gamma_multiply(0.65)),
+    );
+    paint_point_marker(painter, start_pos, stroke);
+    paint_point_marker(painter, end_pos, stroke);
+    paint_point_marker(painter, center_pos, stroke);
+
+    let arc_points: Vec<_> =
+        arc_sample_points(arc_center, radius, start_angle, sweep_angle, PI / 48.0)
+            .into_iter()
+            .map(|point| to_pos(camera.world_to_screen(point, center)))
+            .collect();
+    paint_polyline(painter, &arc_points, stroke);
+}
+
 fn paint_fillet_geometry(
     painter: &egui::Painter,
     camera: &Camera2d,
@@ -182,20 +269,22 @@ fn paint_fillet_geometry(
     painter.line_segment([trim_a_start, trim_a_end], stroke);
     painter.line_segment([trim_b_start, trim_b_end], stroke);
 
-    let arc_points: Vec<_> =
-        arc_sample_points(arc_center, radius, start_angle, sweep_angle, PI / 48.0)
-            .into_iter()
-            .map(|point| to_pos(camera.world_to_screen(point, center)))
-            .collect();
-    paint_polyline(painter, &arc_points, stroke);
-
     let center_pos = to_pos(camera.world_to_screen(arc_center, center));
     let mid_world = arc_mid_point(arc_center, radius, start_angle, sweep_angle);
     let mid_pos = to_pos(camera.world_to_screen(mid_world, center));
+    paint_arc_geometry(
+        painter,
+        camera,
+        center,
+        arc_center,
+        radius,
+        start_angle,
+        sweep_angle,
+        stroke,
+    );
     painter.line_segment([center_pos, mid_pos], stroke);
     paint_point_marker(painter, trim_a_end, stroke);
     paint_point_marker(painter, trim_b_end, stroke);
-    paint_point_marker(painter, center_pos, stroke);
 }
 
 pub(super) fn paint_rect(

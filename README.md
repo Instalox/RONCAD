@@ -31,7 +31,7 @@ This workspace brings together crates for graphics rendering, user interfaces, g
 ### Build
 
 ```bash
-git clone https://github.com/yourusername/roncad.git
+git clone https://github.com/Instalox/RONCAD.git
 cd roncad
 cargo build --release
 ```

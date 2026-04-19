@@ -80,6 +80,17 @@ fn preview_summary(preview: ToolPreview) -> Option<String> {
             radius * 2.0,
             std::f64::consts::TAU * radius,
         )),
+        ToolPreview::ArcRadius { radius, .. } => Some(format!("Arc radius {:.3} mm", radius)),
+        ToolPreview::Arc {
+            radius,
+            sweep_angle,
+            ..
+        } => Some(format!(
+            "Arc R {:.3} mm   Sweep {:.1} deg   Length {:.3} mm",
+            radius,
+            sweep_angle.abs().to_degrees(),
+            radius * sweep_angle.abs(),
+        )),
         ToolPreview::FilletHover {
             radius, max_radius, ..
         } => Some(format!(
@@ -144,6 +155,32 @@ mod tests {
         assert_eq!(
             summary.as_deref(),
             Some("R 2.000 mm   D 4.000 mm   C 12.566 mm")
+        );
+    }
+
+    #[test]
+    fn arc_radius_preview_reports_radius() {
+        let summary = preview_summary(ToolPreview::ArcRadius {
+            center: dvec2(0.0, 0.0),
+            radius: 8.0,
+            rim: dvec2(8.0, 0.0),
+        });
+
+        assert_eq!(summary.as_deref(), Some("Arc radius 8.000 mm"));
+    }
+
+    #[test]
+    fn arc_preview_reports_radius_sweep_and_length() {
+        let summary = preview_summary(ToolPreview::Arc {
+            center: dvec2(0.0, 0.0),
+            radius: 10.0,
+            start_angle: 0.0,
+            sweep_angle: std::f64::consts::FRAC_PI_2,
+        });
+
+        assert_eq!(
+            summary.as_deref(),
+            Some("Arc R 10.000 mm   Sweep 90.0 deg   Length 15.708 mm")
         );
     }
 

@@ -15,6 +15,7 @@ pub enum ActiveToolKind {
     Line,
     Rectangle,
     Circle,
+    Arc,
     Fillet,
     Dimension,
     Extrude,
@@ -28,6 +29,7 @@ impl ActiveToolKind {
             Self::Line => "Line",
             Self::Rectangle => "Rectangle",
             Self::Circle => "Circle",
+            Self::Arc => "Arc",
             Self::Fillet => "Fillet",
             Self::Dimension => "Dimension",
             Self::Extrude => "Extrude",
@@ -43,6 +45,7 @@ impl ActiveToolKind {
                 "Click two opposite corners. Hold Shift to lock square. Right-click or Esc cancels."
             }
             Self::Circle => "Click center, then rim. Right-click or Esc cancels.",
+            Self::Arc => "Click center, then start point, then end point to place an arc.",
             Self::Fillet => {
                 "Click a corner shared by two lines, then move to set radius and click to apply."
             }
@@ -57,6 +60,7 @@ impl ActiveToolKind {
             Self::Line => Some("L"),
             Self::Rectangle => Some("R"),
             Self::Circle => Some("C"),
+            Self::Arc => Some("A"),
             Self::Fillet => Some("F"),
             Self::Dimension => Some("D"),
             Self::Extrude => Some("E"),
@@ -94,6 +98,17 @@ pub enum ToolPreview {
     Circle {
         center: DVec2,
         radius: f64,
+    },
+    ArcRadius {
+        center: DVec2,
+        radius: f64,
+        rim: DVec2,
+    },
+    Arc {
+        center: DVec2,
+        radius: f64,
+        start_angle: f64,
+        sweep_angle: f64,
     },
     FilletHover {
         corner: DVec2,
