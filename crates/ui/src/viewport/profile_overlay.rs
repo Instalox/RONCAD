@@ -29,7 +29,11 @@ pub(super) fn paint(
         }
         SketchProfile::Circle { center: c, radius } => {
             let screen_center = to_pos(camera.world_to_screen(*c, center));
-            painter.circle_stroke(screen_center, (*radius * camera.pixels_per_mm) as f32, stroke);
+            painter.circle_stroke(
+                screen_center,
+                (*radius * camera.pixels_per_mm) as f32,
+                stroke,
+            );
         }
     }
 
@@ -37,6 +41,12 @@ pub(super) fn paint(
     let label = format!("{:.3} mm^2", profile.area());
     let shadow = anchor + egui::vec2(1.0, 1.0);
     let font = FontId::monospace(11.0);
-    painter.text(shadow, Align2::CENTER_BOTTOM, &label, font.clone(), egui::Color32::BLACK);
+    painter.text(
+        shadow,
+        Align2::CENTER_BOTTOM,
+        &label,
+        font.clone(),
+        egui::Color32::BLACK,
+    );
     painter.text(anchor, Align2::CENTER_BOTTOM, label, font, color);
 }

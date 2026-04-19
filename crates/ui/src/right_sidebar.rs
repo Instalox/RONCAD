@@ -30,22 +30,13 @@ pub fn render(ui: &mut Ui, shell: &ShellContext<'_>, response: &mut ShellRespons
                     });
                     ui.add_space(6.0);
                     section(ui, "Export", ph::EXPORT, false, |ui| {
-                        let _ = ui.add_enabled(
-                            false,
-                            egui::Button::new("STL Export Coming Soon"),
-                        );
+                        let _ = ui.add_enabled(false, egui::Button::new("STL Export Coming Soon"));
                     });
                 });
         });
 }
 
-fn section(
-    ui: &mut Ui,
-    title: &str,
-    icon: &str,
-    active: bool,
-    add_contents: impl FnOnce(&mut Ui),
-) {
+fn section(ui: &mut Ui, title: &str, icon: &str, active: bool, add_contents: impl FnOnce(&mut Ui)) {
     Frame::new()
         .fill(ThemeColors::BG_PANEL_ALT)
         .stroke(Stroke::new(1.0, ThemeColors::SEPARATOR))
@@ -68,19 +59,14 @@ fn section(
                             },
                             RichText::new(icon),
                         );
-                        ui.label(
-                            RichText::new(title).color(if active {
-                                ThemeColors::TEXT
-                            } else {
-                                ThemeColors::TEXT_DIM
-                            }),
-                        );
-                        ui.with_layout(
-                            egui::Layout::right_to_left(egui::Align::Center),
-                            |ui| {
-                                ui.colored_label(ThemeColors::TEXT_DIM, ph::DOTS_THREE);
-                            },
-                        );
+                        ui.label(RichText::new(title).color(if active {
+                            ThemeColors::TEXT
+                        } else {
+                            ThemeColors::TEXT_DIM
+                        }));
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            ui.colored_label(ThemeColors::TEXT_DIM, ph::DOTS_THREE);
+                        });
                     });
                 });
 

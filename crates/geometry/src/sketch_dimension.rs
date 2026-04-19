@@ -5,10 +5,7 @@ use glam::DVec2;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum SketchDimension {
-    Distance {
-        start: DVec2,
-        end: DVec2,
-    },
+    Distance { start: DVec2, end: DVec2 },
 }
 
 impl SketchDimension {

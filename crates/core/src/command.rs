@@ -30,6 +30,20 @@ pub enum AppCommand {
         center: DVec2,
         radius: LengthMm,
     },
+    AddArc {
+        sketch: SketchId,
+        center: DVec2,
+        radius: LengthMm,
+        start_angle: f64,
+        sweep_angle: f64,
+    },
+    ApplyLineFillet {
+        sketch: SketchId,
+        line_a: SketchEntityId,
+        line_b: SketchEntityId,
+        corner: DVec2,
+        radius: LengthMm,
+    },
     AddDistanceDimension {
         sketch: SketchId,
         start: DVec2,

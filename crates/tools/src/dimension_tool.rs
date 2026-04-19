@@ -38,11 +38,7 @@ impl Tool for DimensionTool {
         }
     }
 
-    fn on_pointer_click(
-        &mut self,
-        ctx: &ToolContext<'_>,
-        world_mm: DVec2,
-    ) -> Vec<AppCommand> {
+    fn on_pointer_click(&mut self, ctx: &ToolContext<'_>, world_mm: DVec2) -> Vec<AppCommand> {
         let Some(sketch) = ctx.active_sketch else {
             return Vec::new();
         };

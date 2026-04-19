@@ -57,10 +57,7 @@ fn paint_reference(
         SnapKind::Endpoint => paint_endpoint_marker(painter, source, color, 4.0, 1.2),
         SnapKind::Midpoint => paint_midpoint_marker(painter, source, color, 5.0),
         SnapKind::Center => paint_center_marker(painter, source, color, 5.5),
-        SnapKind::Grid
-        | SnapKind::Horizontal
-        | SnapKind::Vertical
-        | SnapKind::Intersection => {}
+        SnapKind::Grid | SnapKind::Horizontal | SnapKind::Vertical | SnapKind::Intersection => {}
     }
 }
 
@@ -70,9 +67,7 @@ fn snap_color(kind: SnapKind) -> Color32 {
         SnapKind::Endpoint => ThemeColors::ACCENT_AMBER,
         SnapKind::Midpoint => ThemeColors::ACCENT,
         SnapKind::Center => ThemeColors::GRID_AXIS_Y,
-        SnapKind::Horizontal | SnapKind::Vertical | SnapKind::Intersection => {
-            ThemeColors::ACCENT
-        }
+        SnapKind::Horizontal | SnapKind::Vertical | SnapKind::Intersection => ThemeColors::ACCENT,
     }
 }
 
@@ -107,12 +102,7 @@ fn paint_endpoint_marker(
     painter.circle_filled(point, fill_radius, color);
 }
 
-fn paint_midpoint_marker(
-    painter: &egui::Painter,
-    point: Pos2,
-    color: Color32,
-    radius: f32,
-) {
+fn paint_midpoint_marker(painter: &egui::Painter, point: Pos2, color: Color32, radius: f32) {
     let stroke = Stroke::new(1.5, color);
     let top = point + egui::vec2(0.0, -radius);
     let right = point + egui::vec2(radius, 0.0);
@@ -125,30 +115,26 @@ fn paint_midpoint_marker(
     painter.circle_filled(point, 1.4, color);
 }
 
-fn paint_center_marker(
-    painter: &egui::Painter,
-    point: Pos2,
-    color: Color32,
-    radius: f32,
-) {
+fn paint_center_marker(painter: &egui::Painter, point: Pos2, color: Color32, radius: f32) {
     let stroke = Stroke::new(1.6, color);
     painter.circle_stroke(point, radius - 1.0, stroke);
     painter.line_segment(
-        [point + egui::vec2(-radius, 0.0), point + egui::vec2(radius, 0.0)],
+        [
+            point + egui::vec2(-radius, 0.0),
+            point + egui::vec2(radius, 0.0),
+        ],
         stroke,
     );
     painter.line_segment(
-        [point + egui::vec2(0.0, -radius), point + egui::vec2(0.0, radius)],
+        [
+            point + egui::vec2(0.0, -radius),
+            point + egui::vec2(0.0, radius),
+        ],
         stroke,
     );
 }
 
-fn paint_alignment_marker(
-    painter: &egui::Painter,
-    point: Pos2,
-    color: Color32,
-    kind: SnapKind,
-) {
+fn paint_alignment_marker(painter: &egui::Painter, point: Pos2, color: Color32, kind: SnapKind) {
     let stroke = Stroke::new(1.5, color);
     painter.rect_stroke(
         Rect::from_center_size(point, egui::vec2(8.0, 8.0)),

@@ -18,11 +18,7 @@ impl Tool for SelectTool {
         ActiveToolKind::Select
     }
 
-    fn on_pointer_click(
-        &mut self,
-        ctx: &ToolContext<'_>,
-        world_mm: DVec2,
-    ) -> Vec<AppCommand> {
+    fn on_pointer_click(&mut self, ctx: &ToolContext<'_>, world_mm: DVec2) -> Vec<AppCommand> {
         let additive = ctx.modifiers.ctrl || ctx.modifiers.shift;
         let Some(sketch_id) = ctx.active_sketch else {
             return if additive {
@@ -105,13 +101,14 @@ mod tests {
     fn ctrl_click_on_entity_emits_toggle() {
         let mut project = Project::new_untitled();
         let sketch_id = project.active_sketch.expect("default sketch");
-        let entity = project
-            .active_sketch_mut()
-            .expect("active sketch")
-            .add(SketchEntity::Circle {
-                center: dvec2(10.0, 10.0),
-                radius: 4.0,
-            });
+        let entity =
+            project
+                .active_sketch_mut()
+                .expect("active sketch")
+                .add(SketchEntity::Circle {
+                    center: dvec2(10.0, 10.0),
+                    radius: 4.0,
+                });
         let ctx = ToolContext {
             active_sketch: Some(sketch_id),
             sketch: project.active_sketch(),

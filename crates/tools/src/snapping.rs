@@ -5,7 +5,7 @@
 //! lightweight horizontal/vertical inference against nearby anchor points.
 
 use glam::DVec2;
-use roncad_geometry::{Sketch, SketchEntity};
+use roncad_geometry::{arc_end_point, arc_mid_point, arc_start_point, Sketch, SketchEntity};
 use roncad_rendering::adaptive_grid_step_mm;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -85,12 +85,7 @@ impl Default for SnapEngine {
 }
 
 impl SnapEngine {
-    pub fn snap(
-        &self,
-        raw: DVec2,
-        sketch: Option<&Sketch>,
-        pixels_per_mm: f64,
-    ) -> SnapResult {
+    pub fn snap(&self, raw: DVec2, sketch: Option<&Sketch>, pixels_per_mm: f64) -> SnapResult {
         let pull_mm = self.pull_radius_px / pixels_per_mm.max(f64::EPSILON);
         let grid_axes = self
             .grid_enabled
@@ -102,11 +97,14 @@ impl SnapEngine {
                     return SnapResult {
                         point: hit.point,
                         kind: Some(hit.kind),
-                        references: [Some(SnapReference {
-                            point: hit.point,
-                            kind: hit.kind,
-                            axis: None,
-                        }), None],
+                        references: [
+                            Some(SnapReference {
+                                point: hit.point,
+                                kind: hit.kind,
+                                axis: None,
+                            }),
+                            None,
+                        ],
                     };
                 }
 
@@ -284,6 +282,29 @@ fn for_each_anchor(sketch: &Sketch, mut visit: impl FnMut(Anchor)) {
                 point: *center,
                 kind: SnapKind::Center,
             }),
+            SketchEntity::Arc {
+                center,
+                radius,
+                start_angle,
+                sweep_angle,
+            } => {
+                visit(Anchor {
+                    point: arc_start_point(*center, *radius, *start_angle),
+                    kind: SnapKind::Endpoint,
+                });
+                visit(Anchor {
+                    point: arc_end_point(*center, *radius, *start_angle, *sweep_angle),
+                    kind: SnapKind::Endpoint,
+                });
+                visit(Anchor {
+                    point: arc_mid_point(*center, *radius, *start_angle, *sweep_angle),
+                    kind: SnapKind::Midpoint,
+                });
+                visit(Anchor {
+                    point: *center,
+                    kind: SnapKind::Center,
+                });
+            }
         }
     }
 }
@@ -342,7 +363,9 @@ mod tests {
         project
             .active_sketch_mut()
             .expect("active sketch")
-            .add(SketchEntity::Point { p: dvec2(12.0, 4.0) });
+            .add(SketchEntity::Point {
+                p: dvec2(12.0, 4.0),
+            });
         let engine = SnapEngine::default();
 
         let result = engine.snap(dvec2(12.3, 20.3), project.active_sketch(), 10.0);
@@ -363,7 +386,9 @@ mod tests {
     fn intersection_alignment_uses_two_reference_points() {
         let mut project = Project::new_untitled();
         let sketch = project.active_sketch_mut().expect("active sketch");
-        sketch.add(SketchEntity::Point { p: dvec2(12.0, 4.0) });
+        sketch.add(SketchEntity::Point {
+            p: dvec2(12.0, 4.0),
+        });
         sketch.add(SketchEntity::Circle {
             center: dvec2(3.0, 20.0),
             radius: 5.0,
@@ -395,7 +420,9 @@ mod tests {
         project
             .active_sketch_mut()
             .expect("active sketch")
-            .add(SketchEntity::Point { p: dvec2(4.0, 12.0) });
+            .add(SketchEntity::Point {
+                p: dvec2(4.0, 12.0),
+            });
         let engine = SnapEngine::default();
 
         let result = engine.snap(dvec2(9.3, 11.8), project.active_sketch(), 10.0);

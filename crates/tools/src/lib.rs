@@ -3,6 +3,7 @@
 
 pub mod circle_tool;
 pub mod dimension_tool;
+pub mod fillet_tool;
 pub mod line_tool;
 pub mod manager;
 pub mod rectangle_tool;
@@ -12,6 +13,4 @@ pub mod tool;
 
 pub use manager::ToolManager;
 pub use snapping::{SnapAxis, SnapEngine, SnapKind, SnapReference, SnapResult};
-pub use tool::{
-    ActiveToolKind, Modifiers, Tool, ToolContext, ToolPreview, ENTITY_PICK_RADIUS_PX,
-};
+pub use tool::{ActiveToolKind, Modifiers, Tool, ToolContext, ToolPreview, ENTITY_PICK_RADIUS_PX};

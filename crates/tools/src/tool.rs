@@ -15,6 +15,7 @@ pub enum ActiveToolKind {
     Line,
     Rectangle,
     Circle,
+    Fillet,
     Dimension,
     Extrude,
 }
@@ -27,6 +28,7 @@ impl ActiveToolKind {
             Self::Line => "Line",
             Self::Rectangle => "Rectangle",
             Self::Circle => "Circle",
+            Self::Fillet => "Fillet",
             Self::Dimension => "Dimension",
             Self::Extrude => "Extrude",
         }
@@ -41,6 +43,9 @@ impl ActiveToolKind {
                 "Click two opposite corners. Hold Shift to lock square. Right-click or Esc cancels."
             }
             Self::Circle => "Click center, then rim. Right-click or Esc cancels.",
+            Self::Fillet => {
+                "Click a corner shared by two lines, then move to set radius and click to apply."
+            }
             Self::Dimension => "Pick two points to dimension. Right-click or Esc clears.",
             Self::Extrude => "Hover a closed profile to preview extrusion target.",
         }
@@ -52,6 +57,7 @@ impl ActiveToolKind {
             Self::Line => Some("L"),
             Self::Rectangle => Some("R"),
             Self::Circle => Some("C"),
+            Self::Fillet => Some("F"),
             Self::Dimension => Some("D"),
             Self::Extrude => Some("E"),
             Self::Pan => None,
@@ -77,10 +83,40 @@ pub struct ToolContext<'a> {
 #[derive(Debug, Clone, Copy)]
 pub enum ToolPreview {
     None,
-    Line { start: DVec2, end: DVec2 },
-    Rectangle { corner_a: DVec2, corner_b: DVec2 },
-    Circle { center: DVec2, radius: f64 },
-    Measurement { start: DVec2, end: DVec2 },
+    Line {
+        start: DVec2,
+        end: DVec2,
+    },
+    Rectangle {
+        corner_a: DVec2,
+        corner_b: DVec2,
+    },
+    Circle {
+        center: DVec2,
+        radius: f64,
+    },
+    FilletHover {
+        corner: DVec2,
+        trim_a: (DVec2, DVec2),
+        trim_b: (DVec2, DVec2),
+        center: DVec2,
+        radius: f64,
+        start_angle: f64,
+        sweep_angle: f64,
+        max_radius: f64,
+    },
+    Fillet {
+        trim_a: (DVec2, DVec2),
+        trim_b: (DVec2, DVec2),
+        center: DVec2,
+        radius: f64,
+        start_angle: f64,
+        sweep_angle: f64,
+    },
+    Measurement {
+        start: DVec2,
+        end: DVec2,
+    },
 }
 
 pub trait Tool: Send {
@@ -88,11 +124,7 @@ pub trait Tool: Send {
 
     fn on_pointer_move(&mut self, _ctx: &ToolContext<'_>, _world_mm: DVec2) {}
 
-    fn on_pointer_click(
-        &mut self,
-        _ctx: &ToolContext<'_>,
-        _world_mm: DVec2,
-    ) -> Vec<AppCommand> {
+    fn on_pointer_click(&mut self, _ctx: &ToolContext<'_>, _world_mm: DVec2) -> Vec<AppCommand> {
         Vec::new()
     }
 

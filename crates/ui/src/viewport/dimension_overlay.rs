@@ -38,8 +38,8 @@ fn paint_annotation(
     font: &FontId,
 ) {
     let shadow_color = Color32::from_rgba_unmultiplied(0, 0, 0, 180);
-    let screen = to_pos(camera.world_to_screen(annotation.anchor_world, center))
-        + annotation.offset_px;
+    let screen =
+        to_pos(camera.world_to_screen(annotation.anchor_world, center)) + annotation.offset_px;
     let shadow = screen + egui::vec2(1.0, 1.0);
 
     painter.text(

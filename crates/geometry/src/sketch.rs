@@ -46,11 +46,7 @@ impl Sketch {
         self.entities.insert(entity)
     }
 
-    pub fn add_line_with_splits(
-        &mut self,
-        a: DVec2,
-        b: DVec2,
-    ) -> LineInsertResult {
+    pub fn add_line_with_splits(&mut self, a: DVec2, b: DVec2) -> LineInsertResult {
         if a.distance_squared(b) <= SPLIT_EPSILON * SPLIT_EPSILON {
             return LineInsertResult::default();
         }
@@ -111,16 +107,11 @@ impl Sketch {
         self.entities.iter()
     }
 
-    pub fn add_dimension(
-        &mut self,
-        dimension: SketchDimension,
-    ) -> SketchDimensionId {
+    pub fn add_dimension(&mut self, dimension: SketchDimension) -> SketchDimensionId {
         self.dimensions.insert(dimension)
     }
 
-    pub fn iter_dimensions(
-        &self,
-    ) -> impl Iterator<Item = (SketchDimensionId, &SketchDimension)> {
+    pub fn iter_dimensions(&self) -> impl Iterator<Item = (SketchDimensionId, &SketchDimension)> {
         self.dimensions.iter()
     }
 }
@@ -132,12 +123,7 @@ struct SegmentIntersection {
     t_cd: f64,
 }
 
-fn segment_intersection(
-    a: DVec2,
-    b: DVec2,
-    c: DVec2,
-    d: DVec2,
-) -> Option<SegmentIntersection> {
+fn segment_intersection(a: DVec2, b: DVec2, c: DVec2, d: DVec2) -> Option<SegmentIntersection> {
     let r = b - a;
     let s = d - c;
     let denom = cross(r, s);
@@ -182,8 +168,7 @@ fn split_segment(a: DVec2, b: DVec2, split_points: &[DVec2]) -> Vec<(DVec2, DVec
         .filter_map(|window| {
             let start = window[0];
             let end = window[1];
-            (start.distance_squared(end) > SPLIT_EPSILON * SPLIT_EPSILON)
-                .then_some((start, end))
+            (start.distance_squared(end) > SPLIT_EPSILON * SPLIT_EPSILON).then_some((start, end))
         })
         .collect()
 }
@@ -209,7 +194,7 @@ fn cross(a: DVec2, b: DVec2) -> f64 {
 
 #[cfg(test)]
 mod tests {
-    use glam::{DVec2, dvec2};
+    use glam::{dvec2, DVec2};
 
     use super::Sketch;
     use crate::SketchEntity;

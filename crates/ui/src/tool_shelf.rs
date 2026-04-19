@@ -14,6 +14,7 @@ const TOOLS: &[ActiveToolKind] = &[
     ActiveToolKind::Line,
     ActiveToolKind::Rectangle,
     ActiveToolKind::Circle,
+    ActiveToolKind::Fillet,
     ActiveToolKind::Dimension,
     ActiveToolKind::Extrude,
 ];
@@ -31,11 +32,13 @@ pub fn render(ui: &mut Ui, shell: &mut ShellContext<'_>, _response: &mut ShellRe
                     let accent = ThemeColors::tool_accent(*tool);
                     let label = RichText::new(tool_glyph(*tool))
                         .font(FontId::proportional(18.0))
-                        .color(if active { accent } else { ThemeColors::TEXT_DIM });
-                    let response = ui.add_sized(
-                        Vec2::new(38.0, 38.0),
-                        Button::selectable(active, label),
-                    );
+                        .color(if active {
+                            accent
+                        } else {
+                            ThemeColors::TEXT_DIM
+                        });
+                    let response =
+                        ui.add_sized(Vec2::new(38.0, 38.0), Button::selectable(active, label));
                     if response.clicked() {
                         shell.tool_manager.set_active(*tool);
                     }
@@ -72,6 +75,7 @@ fn tool_glyph(tool: ActiveToolKind) -> &'static str {
         ActiveToolKind::Line => ph::LINE_SEGMENT,
         ActiveToolKind::Rectangle => ph::RECTANGLE,
         ActiveToolKind::Circle => ph::CIRCLE,
+        ActiveToolKind::Fillet => "F",
         ActiveToolKind::Dimension => ph::RULER,
         ActiveToolKind::Extrude => ph::ARROW_FAT_LINE_UP,
     }

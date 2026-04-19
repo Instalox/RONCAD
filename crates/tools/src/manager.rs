@@ -6,6 +6,7 @@ use roncad_core::command::AppCommand;
 
 use crate::circle_tool::CircleTool;
 use crate::dimension_tool::DimensionTool;
+use crate::fillet_tool::FilletTool;
 use crate::line_tool::LineTool;
 use crate::rectangle_tool::RectangleTool;
 use crate::select_tool::SelectTool;
@@ -47,11 +48,7 @@ impl ToolManager {
         self.tool.on_pointer_move(ctx, world_mm);
     }
 
-    pub fn on_pointer_click(
-        &mut self,
-        ctx: &ToolContext,
-        world_mm: DVec2,
-    ) -> Vec<AppCommand> {
+    pub fn on_pointer_click(&mut self, ctx: &ToolContext, world_mm: DVec2) -> Vec<AppCommand> {
         self.tool.on_pointer_click(ctx, world_mm)
     }
 
@@ -85,6 +82,7 @@ fn make_tool(kind: ActiveToolKind) -> Box<dyn Tool> {
         ActiveToolKind::Line => Box::new(LineTool::default()),
         ActiveToolKind::Rectangle => Box::new(RectangleTool::default()),
         ActiveToolKind::Circle => Box::new(CircleTool::default()),
+        ActiveToolKind::Fillet => Box::new(FilletTool::default()),
         ActiveToolKind::Dimension => Box::new(DimensionTool::default()),
         ActiveToolKind::Extrude => Box::new(PassiveTool(kind)),
     }

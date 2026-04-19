@@ -15,7 +15,9 @@ pub(super) fn paint(
     let pad = 8.0;
     let kind = shell.tool_manager.active_kind();
     let accent = ThemeColors::tool_accent(kind);
-    let shortcut = kind.shortcut().map_or(String::new(), |shortcut| format!(" [{shortcut}]"));
+    let shortcut = kind
+        .shortcut()
+        .map_or(String::new(), |shortcut| format!(" [{shortcut}]"));
     let text = format!(
         "{}{}   |   {}   |   middle/right-drag: pan   |   scroll: zoom",
         kind.label(),

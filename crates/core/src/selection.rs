@@ -41,10 +41,7 @@ impl Selection {
         self.items.iter()
     }
 
-    pub fn retain(
-        &mut self,
-        mut keep: impl FnMut(&SelectionItem) -> bool,
-    ) {
+    pub fn retain(&mut self, mut keep: impl FnMut(&SelectionItem) -> bool) {
         self.items.retain(|item| keep(item));
     }
 

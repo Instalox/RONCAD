@@ -5,7 +5,9 @@ use egui::{Align2, Color32, Vec2};
 use glam::DVec2;
 use roncad_core::ids::{SketchEntityId, SketchId};
 use roncad_core::selection::{Selection, SelectionItem};
-use roncad_geometry::{Project, SketchDimension, SketchEntity};
+use roncad_geometry::{
+    arc_end_point, arc_mid_point, arc_start_point, Project, SketchDimension, SketchEntity,
+};
 
 use crate::theme::ThemeColors;
 
@@ -61,9 +63,7 @@ pub(crate) fn selected_entity_dimensions(
     dimensions
 }
 
-pub(crate) fn active_sketch_dimension_annotations(
-    project: &Project,
-) -> Vec<DimensionAnnotation> {
+pub(crate) fn active_sketch_dimension_annotations(project: &Project) -> Vec<DimensionAnnotation> {
     let Some(sketch) = project.active_sketch() else {
         return Vec::new();
     };
@@ -84,7 +84,11 @@ pub(crate) fn hovered_entity_summary(
 
     Some(match entity {
         SketchEntity::Point { p } => {
-            format!("Hover Point   X {}   Y {}", format_value(p.x), format_value(p.y))
+            format!(
+                "Hover Point   X {}   Y {}",
+                format_value(p.x),
+                format_value(p.y)
+            )
         }
         SketchEntity::Line { a, b } => {
             format!("Hover Line   L {}", format_mm(a.distance(*b)))
@@ -100,6 +104,17 @@ pub(crate) fn hovered_entity_summary(
         }
         SketchEntity::Circle { radius, .. } => {
             format!("Hover Circle   R {}", format_mm(*radius))
+        }
+        SketchEntity::Arc {
+            radius,
+            sweep_angle,
+            ..
+        } => {
+            format!(
+                "Hover Arc   R {}   A {:.1} deg",
+                format_mm(*radius),
+                sweep_angle.to_degrees().abs(),
+            )
         }
     })
 }
@@ -204,12 +219,55 @@ fn describe_entity(entity: &SketchEntity) -> EntityDimensions {
                 color: ThemeColors::TEXT,
             }],
         },
+        SketchEntity::Arc {
+            center,
+            radius,
+            start_angle,
+            sweep_angle,
+        } => {
+            let midpoint = arc_mid_point(*center, *radius, *start_angle, *sweep_angle);
+            let start = arc_start_point(*center, *radius, *start_angle);
+            let end = arc_end_point(*center, *radius, *start_angle, *sweep_angle);
+            EntityDimensions {
+                kind: entity.kind_name(),
+                summary: vec![
+                    DimensionValue {
+                        label: "Radius",
+                        value_mm: *radius,
+                    },
+                    DimensionValue {
+                        label: "Arc Length",
+                        value_mm: radius * sweep_angle.abs(),
+                    },
+                    DimensionValue {
+                        label: "Sweep",
+                        value_mm: sweep_angle.to_degrees().abs(),
+                    },
+                ],
+                annotations: vec![
+                    DimensionAnnotation {
+                        anchor_world: midpoint,
+                        span_world: None,
+                        offset_px: Vec2::new(0.0, -10.0),
+                        align: Align2::CENTER_BOTTOM,
+                        text: format!("R {}", format_mm(*radius)),
+                        color: ThemeColors::TEXT,
+                    },
+                    DimensionAnnotation {
+                        anchor_world: (start + end) * 0.5,
+                        span_world: None,
+                        offset_px: Vec2::new(10.0, 0.0),
+                        align: Align2::LEFT_CENTER,
+                        text: format!("{:.1} deg", sweep_angle.to_degrees().abs()),
+                        color: ThemeColors::TEXT,
+                    },
+                ],
+            }
+        }
     }
 }
 
-fn describe_sketch_dimension_annotation(
-    dimension: &SketchDimension,
-) -> DimensionAnnotation {
+fn describe_sketch_dimension_annotation(dimension: &SketchDimension) -> DimensionAnnotation {
     match dimension {
         SketchDimension::Distance { start, end } => {
             let delta = *end - *start;
@@ -251,8 +309,7 @@ mod tests {
     use roncad_geometry::{Project, SketchDimension, SketchEntity};
 
     use super::{
-        active_sketch_dimension_annotations, hovered_entity_summary,
-        selected_entity_dimensions,
+        active_sketch_dimension_annotations, hovered_entity_summary, selected_entity_dimensions,
     };
     use crate::theme::ThemeColors;
 
@@ -283,13 +340,14 @@ mod tests {
     fn selected_rectangle_reports_width_and_height() {
         let mut project = Project::new_untitled();
         let sketch = project.active_sketch.expect("default sketch");
-        let entity = project
-            .active_sketch_mut()
-            .expect("active sketch")
-            .add(SketchEntity::Rectangle {
-                corner_a: dvec2(2.0, 3.0),
-                corner_b: dvec2(12.0, 9.0),
-            });
+        let entity =
+            project
+                .active_sketch_mut()
+                .expect("active sketch")
+                .add(SketchEntity::Rectangle {
+                    corner_a: dvec2(2.0, 3.0),
+                    corner_b: dvec2(12.0, 9.0),
+                });
         let mut selection = Selection::default();
         selection.insert(SelectionItem::SketchEntity { sketch, entity });
 
@@ -327,13 +385,14 @@ mod tests {
     fn hovered_rectangle_reports_compact_summary() {
         let mut project = Project::new_untitled();
         let sketch = project.active_sketch.expect("default sketch");
-        let entity = project
-            .active_sketch_mut()
-            .expect("active sketch")
-            .add(SketchEntity::Rectangle {
-                corner_a: dvec2(2.0, 3.0),
-                corner_b: dvec2(12.0, 9.0),
-            });
+        let entity =
+            project
+                .active_sketch_mut()
+                .expect("active sketch")
+                .add(SketchEntity::Rectangle {
+                    corner_a: dvec2(2.0, 3.0),
+                    corner_b: dvec2(12.0, 9.0),
+                });
 
         let summary = hovered_entity_summary(&project, Some((sketch, entity)));
 

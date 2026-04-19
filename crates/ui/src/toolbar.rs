@@ -86,12 +86,7 @@ fn icon_button(ui: &mut Ui, icon: &str, hover_text: &str) -> egui::Response {
     .on_hover_text(hover_text)
 }
 
-fn mode_chip(
-    ui: &mut Ui,
-    label: &str,
-    color: egui::Color32,
-    dim: egui::Color32,
-) {
+fn mode_chip(ui: &mut Ui, label: &str, color: egui::Color32, dim: egui::Color32) {
     Frame::new()
         .fill(ThemeColors::BG_HEADER_ACTIVE)
         .stroke(Stroke::new(1.0, dim))

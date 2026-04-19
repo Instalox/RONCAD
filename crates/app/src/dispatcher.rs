@@ -3,13 +3,9 @@
 
 use roncad_core::command::AppCommand;
 use roncad_core::selection::{Selection, SelectionItem};
-use roncad_geometry::{Project, Sketch, SketchDimension, SketchEntity};
+use roncad_geometry::{apply_line_fillet, Project, Sketch, SketchDimension, SketchEntity};
 
-pub fn apply(
-    project: &mut Project,
-    selection: &mut Selection,
-    command: &AppCommand,
-) {
+pub fn apply(project: &mut Project, selection: &mut Selection, command: &AppCommand) {
     match command {
         AppCommand::CreateSketch { name } => {
             if let Some(plane_id) = project.workplanes.keys().next() {
@@ -54,7 +50,11 @@ pub fn apply(
                 }
             }
         }
-        AppCommand::AddRectangle { sketch, corner_a, corner_b } => {
+        AppCommand::AddRectangle {
+            sketch,
+            corner_a,
+            corner_b,
+        } => {
             if let Some(s) = project.sketches.get_mut(*sketch) {
                 s.add(SketchEntity::Rectangle {
                     corner_a: *corner_a,
@@ -62,12 +62,76 @@ pub fn apply(
                 });
             }
         }
-        AppCommand::AddCircle { sketch, center, radius } => {
+        AppCommand::AddCircle {
+            sketch,
+            center,
+            radius,
+        } => {
             if let Some(s) = project.sketches.get_mut(*sketch) {
                 s.add(SketchEntity::Circle {
                     center: *center,
                     radius: radius.as_f64(),
                 });
+            }
+        }
+        AppCommand::AddArc {
+            sketch,
+            center,
+            radius,
+            start_angle,
+            sweep_angle,
+        } => {
+            if let Some(s) = project.sketches.get_mut(*sketch) {
+                s.add(SketchEntity::Arc {
+                    center: *center,
+                    radius: radius.as_f64(),
+                    start_angle: *start_angle,
+                    sweep_angle: *sweep_angle,
+                });
+            }
+        }
+        AppCommand::ApplyLineFillet {
+            sketch,
+            line_a,
+            line_b,
+            corner,
+            radius,
+        } => {
+            if let Some(s) = project.sketches.get_mut(*sketch) {
+                let selected_a = selection.contains(&SelectionItem::SketchEntity {
+                    sketch: *sketch,
+                    entity: *line_a,
+                });
+                let selected_b = selection.contains(&SelectionItem::SketchEntity {
+                    sketch: *sketch,
+                    entity: *line_b,
+                });
+
+                if let Some(result) =
+                    apply_line_fillet(s, *line_a, *line_b, *corner, radius.as_f64())
+                {
+                    if selected_a || selected_b {
+                        for removed in result.removed.into_iter().flatten() {
+                            selection.remove(&SelectionItem::SketchEntity {
+                                sketch: *sketch,
+                                entity: removed,
+                            });
+                        }
+
+                        for entity in result.inserted_lines {
+                            selection.insert(SelectionItem::SketchEntity {
+                                sketch: *sketch,
+                                entity,
+                            });
+                        }
+                        if let Some(entity) = result.inserted_arc {
+                            selection.insert(SelectionItem::SketchEntity {
+                                sketch: *sketch,
+                                entity,
+                            });
+                        }
+                    }
+                }
             }
         }
         AppCommand::AddDistanceDimension { sketch, start, end } => {
@@ -152,6 +216,7 @@ mod tests {
     use super::apply;
     use roncad_core::command::AppCommand;
     use roncad_core::selection::Selection;
+    use roncad_core::units::LengthMm;
     use roncad_geometry::SketchEntity;
 
     #[test]
@@ -183,25 +248,24 @@ mod tests {
         let mut project = Project::new_untitled();
         let mut selection = Selection::default();
         let sketch = project.active_sketch.expect("default project has sketch");
-        let entity = project
-            .active_sketch_mut()
-            .expect("active sketch")
-            .add(SketchEntity::Circle {
-                center: dvec2(5.0, 5.0),
-                radius: 3.0,
-            });
+        let entity =
+            project
+                .active_sketch_mut()
+                .expect("active sketch")
+                .add(SketchEntity::Circle {
+                    center: dvec2(5.0, 5.0),
+                    radius: 3.0,
+                });
 
         selection.insert(SelectionItem::SketchEntity { sketch, entity });
         apply(&mut project, &mut selection, &AppCommand::DeleteSelection);
 
         assert!(selection.is_empty());
-        assert!(
-            !project
-                .active_sketch()
-                .expect("active sketch")
-                .entities
-                .contains_key(entity)
-        );
+        assert!(!project
+            .active_sketch()
+            .expect("active sketch")
+            .entities
+            .contains_key(entity));
     }
 
     #[test]
@@ -253,6 +317,46 @@ mod tests {
     }
 
     #[test]
+    fn add_arc_persists_on_sketch() {
+        let mut project = Project::new_untitled();
+        let mut selection = Selection::default();
+        let sketch = project.active_sketch.expect("default project has sketch");
+
+        apply(
+            &mut project,
+            &mut selection,
+            &AppCommand::AddArc {
+                sketch,
+                center: dvec2(10.0, 10.0),
+                radius: LengthMm::new(5.0),
+                start_angle: 0.0,
+                sweep_angle: std::f64::consts::FRAC_PI_2,
+            },
+        );
+
+        let entities: Vec<_> = project
+            .active_sketch()
+            .expect("active sketch")
+            .iter()
+            .collect();
+        assert!(entities.iter().any(|(_, entity)| {
+            matches!(
+                entity,
+                SketchEntity::Arc {
+                    center,
+                    radius,
+                    start_angle,
+                    sweep_angle,
+                }
+                    if *center == dvec2(10.0, 10.0)
+                        && (*radius - 5.0).abs() < f64::EPSILON
+                        && (*start_angle - 0.0).abs() < f64::EPSILON
+                        && (*sweep_angle - std::f64::consts::FRAC_PI_2).abs() < f64::EPSILON
+            )
+        }));
+    }
+
+    #[test]
     fn add_line_splits_crossing_lines_into_four_entities() {
         let mut project = Project::new_untitled();
         let mut selection = Selection::default();
@@ -299,13 +403,14 @@ mod tests {
         let mut project = Project::new_untitled();
         let mut selection = Selection::default();
         let sketch = project.active_sketch.expect("default project has sketch");
-        let original = project
-            .active_sketch_mut()
-            .expect("active sketch")
-            .add(SketchEntity::Line {
-                a: dvec2(0.0, 0.0),
-                b: dvec2(10.0, 0.0),
-            });
+        let original =
+            project
+                .active_sketch_mut()
+                .expect("active sketch")
+                .add(SketchEntity::Line {
+                    a: dvec2(0.0, 0.0),
+                    b: dvec2(10.0, 0.0),
+                });
         selection.insert(SelectionItem::SketchEntity {
             sketch,
             entity: original,
@@ -324,9 +429,10 @@ mod tests {
         let selected_lines: Vec<_> = selection
             .iter()
             .filter_map(|item| match item {
-                SelectionItem::SketchEntity { sketch: selected_sketch, entity }
-                    if *selected_sketch == sketch =>
-                {
+                SelectionItem::SketchEntity {
+                    sketch: selected_sketch,
+                    entity,
+                } if *selected_sketch == sketch => {
                     match project
                         .active_sketch()
                         .expect("active sketch")
@@ -354,9 +460,102 @@ mod tests {
         ));
     }
 
+    #[test]
+    fn apply_line_fillet_replaces_selected_entities_with_trimmed_result() {
+        let mut project = Project::new_untitled();
+        let mut selection = Selection::default();
+        let sketch = project.active_sketch.expect("default project has sketch");
+        let line_a = project
+            .active_sketch_mut()
+            .expect("active sketch")
+            .add(SketchEntity::Line {
+                a: dvec2(0.0, 0.0),
+                b: dvec2(10.0, 0.0),
+            });
+        let line_b = project
+            .active_sketch_mut()
+            .expect("active sketch")
+            .add(SketchEntity::Line {
+                a: dvec2(0.0, 0.0),
+                b: dvec2(0.0, 10.0),
+            });
+        selection.insert(SelectionItem::SketchEntity {
+            sketch,
+            entity: line_a,
+        });
+        selection.insert(SelectionItem::SketchEntity {
+            sketch,
+            entity: line_b,
+        });
+
+        apply(
+            &mut project,
+            &mut selection,
+            &AppCommand::ApplyLineFillet {
+                sketch,
+                line_a,
+                line_b,
+                corner: dvec2(0.0, 0.0),
+                radius: LengthMm::new(2.0),
+            },
+        );
+
+        let active_sketch = project.active_sketch().expect("active sketch");
+        let selected_entities: Vec<_> = selection
+            .iter()
+            .filter_map(|item| match item {
+                SelectionItem::SketchEntity {
+                    sketch: selected_sketch,
+                    entity,
+                } if *selected_sketch == sketch => active_sketch.entities.get(*entity).cloned(),
+                _ => None,
+            })
+            .collect();
+
+        assert_eq!(selected_entities.len(), 3);
+        assert!(selected_entities.iter().any(|entity| {
+            matches!(
+                entity,
+                SketchEntity::Arc {
+                    center,
+                    radius,
+                    sweep_angle,
+                    ..
+                }
+                    if (*center - dvec2(2.0, 2.0)).length() < 1e-6
+                        && (*radius - 2.0).abs() < 1e-6
+                        && (sweep_angle.abs() - std::f64::consts::FRAC_PI_2).abs() < 1e-6
+            )
+        }));
+
+        let selected_lines: Vec<_> = selected_entities
+            .iter()
+            .filter_map(|entity| match entity {
+                SketchEntity::Line { a, b } => Some((*a, *b)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(selected_lines.len(), 2);
+        assert!(contains_line(
+            &selected_lines,
+            dvec2(10.0, 0.0),
+            dvec2(2.0, 0.0)
+        ));
+        assert!(contains_line(
+            &selected_lines,
+            dvec2(0.0, 10.0),
+            dvec2(0.0, 2.0)
+        ));
+    }
+
     fn contains_line(lines: &[(glam::DVec2, glam::DVec2)], a: glam::DVec2, b: glam::DVec2) -> bool {
         lines.iter().any(|(line_a, line_b)| {
-            (*line_a == a && *line_b == b) || (*line_a == b && *line_b == a)
+            (same_point(*line_a, a) && same_point(*line_b, b))
+                || (same_point(*line_a, b) && same_point(*line_b, a))
         })
+    }
+
+    fn same_point(a: glam::DVec2, b: glam::DVec2) -> bool {
+        a.distance_squared(b) < 1e-9
     }
 }

@@ -7,11 +7,7 @@ use roncad_core::command::AppCommand;
 use crate::shell::{ShellContext, ShellResponse};
 use crate::theme::ThemeColors;
 
-pub fn render_browser_section(
-    ui: &mut Ui,
-    shell: &ShellContext<'_>,
-    response: &mut ShellResponse,
-) {
+pub fn render_browser_section(ui: &mut Ui, shell: &ShellContext<'_>, response: &mut ShellResponse) {
     CollapsingHeader::new("Origin")
         .default_open(true)
         .show(ui, |ui| {

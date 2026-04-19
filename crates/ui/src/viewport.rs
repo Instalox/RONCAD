@@ -14,7 +14,7 @@ use egui::{CentralPanel, Color32, Frame, Key, PointerButton, Pos2, Rect, Sense, 
 use glam::DVec2;
 use roncad_core::command::AppCommand;
 use roncad_core::ids::{SketchEntityId, SketchId};
-use roncad_geometry::{SketchProfile, pick_closed_profile, pick_entity};
+use roncad_geometry::{pick_closed_profile, pick_entity, SketchProfile};
 use roncad_tools::{
     ActiveToolKind, Modifiers, SnapEngine, SnapResult, ToolContext, ENTITY_PICK_RADIUS_PX,
 };
@@ -29,11 +29,9 @@ pub fn render(ui: &mut Ui, shell: &mut ShellContext<'_>, response: &mut ShellRes
         .frame(Frame::new().fill(ThemeColors::BG_DEEP))
         .show_inside(ui, |ui| {
             let available = ui.available_size_before_wrap();
-            let (rect, resp) =
-                ui.allocate_exact_size(available, Sense::click_and_drag());
+            let (rect, resp) = ui.allocate_exact_size(available, Sense::click_and_drag());
 
-            let (hovered_entity, hovered_profile) =
-                handle_input(ui, &resp, shell, rect, response);
+            let (hovered_entity, hovered_profile) = handle_input(ui, &resp, shell, rect, response);
             grid_overlay::paint(ui.painter(), rect, shell.camera);
             sketch_overlay::paint(
                 ui.painter(),
@@ -89,13 +87,10 @@ fn handle_input(
     };
     let hovered_entity = hovered_selectable_entity(raw_cursor_world, active_kind, &ctx);
     let hovered_profile = hovered_closed_profile(raw_cursor_world, active_kind, &ctx);
-    let snap_result = raw_cursor_world.and_then(|world| {
-        active_snap_result(world, active_kind, shell.snap_engine, &ctx)
-    });
+    let snap_result = raw_cursor_world
+        .and_then(|world| active_snap_result(world, active_kind, shell.snap_engine, &ctx));
     *shell.snap_result = snap_result;
-    let cursor_world = raw_cursor_world.map(|world| {
-        snap_result.map_or(world, |snap| snap.point)
-    });
+    let cursor_world = raw_cursor_world.map(|world| snap_result.map_or(world, |snap| snap.point));
     *shell.cursor_world_mm = cursor_world;
 
     if let Some(world) = cursor_world {
@@ -130,9 +125,7 @@ fn handle_input(
         response.commands.push(AppCommand::DeleteSelection);
     }
 
-    if resp.dragged_by(PointerButton::Middle)
-        || resp.dragged_by(PointerButton::Secondary)
-    {
+    if resp.dragged_by(PointerButton::Middle) || resp.dragged_by(PointerButton::Secondary) {
         let delta = resp.drag_delta();
         shell
             .camera
@@ -144,9 +137,7 @@ fn handle_input(
         if scroll.abs() > f32::EPSILON {
             if let Some(ptr) = resp.hover_pos() {
                 let factor = (scroll as f64 * 0.0025).exp();
-                shell
-                    .camera
-                    .zoom_about(pos_to_dvec(ptr), center, factor);
+                shell.camera.zoom_about(pos_to_dvec(ptr), center, factor);
             }
         }
     }
@@ -237,6 +228,8 @@ fn handle_tool_shortcuts(ui: &Ui, manager: &mut roncad_tools::ToolManager) {
             Some(ActiveToolKind::Rectangle)
         } else if i.key_pressed(Key::C) {
             Some(ActiveToolKind::Circle)
+        } else if i.key_pressed(Key::F) {
+            Some(ActiveToolKind::Fillet)
         } else if i.key_pressed(Key::D) {
             Some(ActiveToolKind::Dimension)
         } else if i.key_pressed(Key::E) {

@@ -80,6 +80,21 @@ fn preview_summary(preview: ToolPreview) -> Option<String> {
             radius * 2.0,
             std::f64::consts::TAU * radius,
         )),
+        ToolPreview::FilletHover {
+            radius, max_radius, ..
+        } => Some(format!(
+            "Fillet candidate   Preview R {:.3} mm   Max R {:.3} mm",
+            radius, max_radius,
+        )),
+        ToolPreview::Fillet {
+            radius,
+            sweep_angle,
+            ..
+        } => Some(format!(
+            "Fillet R {:.3} mm   Sweep {:.1} deg",
+            radius,
+            sweep_angle.abs().to_degrees(),
+        )),
         ToolPreview::Measurement { start, end } => {
             Some(format!("Measure {:.3} mm", start.distance(end)))
         }
@@ -129,6 +144,42 @@ mod tests {
         assert_eq!(
             summary.as_deref(),
             Some("R 2.000 mm   D 4.000 mm   C 12.566 mm")
+        );
+    }
+
+    #[test]
+    fn fillet_preview_reports_radius_and_sweep() {
+        let summary = preview_summary(ToolPreview::Fillet {
+            trim_a: (dvec2(10.0, 0.0), dvec2(2.0, 0.0)),
+            trim_b: (dvec2(0.0, 10.0), dvec2(0.0, 2.0)),
+            center: dvec2(2.0, 2.0),
+            radius: 2.0,
+            start_angle: -std::f64::consts::FRAC_PI_2,
+            sweep_angle: std::f64::consts::FRAC_PI_2,
+        });
+
+        assert_eq!(
+            summary.as_deref(),
+            Some("Fillet R 2.000 mm   Sweep 90.0 deg")
+        );
+    }
+
+    #[test]
+    fn fillet_hover_reports_preview_and_max_radius() {
+        let summary = preview_summary(ToolPreview::FilletHover {
+            corner: dvec2(0.0, 0.0),
+            trim_a: (dvec2(10.0, 0.0), dvec2(2.0, 0.0)),
+            trim_b: (dvec2(0.0, 10.0), dvec2(0.0, 2.0)),
+            center: dvec2(2.0, 2.0),
+            radius: 2.0,
+            start_angle: -std::f64::consts::FRAC_PI_2,
+            sweep_angle: std::f64::consts::FRAC_PI_2,
+            max_radius: 10.0,
+        });
+
+        assert_eq!(
+            summary.as_deref(),
+            Some("Fillet candidate   Preview R 2.000 mm   Max R 10.000 mm")
         );
     }
 }

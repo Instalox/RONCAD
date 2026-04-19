@@ -5,7 +5,7 @@ use std::collections::{HashMap, HashSet};
 
 use glam::DVec2;
 
-use crate::{Sketch, SketchEntity};
+use crate::{arc_sample_points, Sketch, SketchEntity};
 
 const PROFILE_EPSILON: f64 = 1e-6;
 const PROFILE_QUANTIZE_SCALE: f64 = 1_000_000.0;
@@ -62,7 +62,8 @@ fn primitive_profiles(sketch: &Sketch) -> Vec<SketchProfile> {
             }),
             SketchEntity::Point { .. }
             | SketchEntity::Line { .. }
-            | SketchEntity::Rectangle { .. } => None,
+            | SketchEntity::Rectangle { .. }
+            | SketchEntity::Arc { .. } => None,
         })
         .collect()
 }
@@ -143,6 +144,23 @@ fn sketch_segments(sketch: &Sketch) -> Vec<(DVec2, DVec2)> {
                     segments.push((corners[i], corners[(i + 1) % 4]));
                 }
             }
+            SketchEntity::Arc {
+                center,
+                radius,
+                start_angle,
+                sweep_angle,
+            } => {
+                let points = arc_sample_points(
+                    *center,
+                    *radius,
+                    *start_angle,
+                    *sweep_angle,
+                    std::f64::consts::PI / 48.0,
+                );
+                for window in points.windows(2) {
+                    segments.push((window[0], window[1]));
+                }
+            }
             SketchEntity::Point { .. } | SketchEntity::Circle { .. } => {}
         }
     }
@@ -171,8 +189,7 @@ fn split_segments(raw_segments: &[(DVec2, DVec2)]) -> Vec<(DVec2, DVec2)> {
     for (index, (start, end)) in raw_segments.iter().enumerate() {
         let mut points = split_points[index].clone();
         points.sort_by(|lhs, rhs| {
-            segment_parameter(*start, *end, *lhs)
-                .total_cmp(&segment_parameter(*start, *end, *rhs))
+            segment_parameter(*start, *end, *lhs).total_cmp(&segment_parameter(*start, *end, *rhs))
         });
         points.dedup_by(|lhs, rhs| lhs.distance_squared(*rhs) <= PROFILE_EPSILON * PROFILE_EPSILON);
 
@@ -188,9 +205,7 @@ fn split_segments(raw_segments: &[(DVec2, DVec2)]) -> Vec<(DVec2, DVec2)> {
     segments
 }
 
-fn build_graph(
-    segments: &[(DVec2, DVec2)],
-) -> (Vec<DVec2>, Vec<(usize, usize)>) {
+fn build_graph(segments: &[(DVec2, DVec2)]) -> (Vec<DVec2>, Vec<(usize, usize)>) {
     let mut vertices = Vec::<DVec2>::new();
     let mut vertex_ids = HashMap::<QuantizedPoint, usize>::new();
     let mut edges = Vec::<(usize, usize)>::new();
@@ -290,12 +305,7 @@ struct SegmentIntersection {
     point: DVec2,
 }
 
-fn segment_intersection(
-    a: DVec2,
-    b: DVec2,
-    c: DVec2,
-    d: DVec2,
-) -> Option<SegmentIntersection> {
+fn segment_intersection(a: DVec2, b: DVec2, c: DVec2, d: DVec2) -> Option<SegmentIntersection> {
     let r = b - a;
     let s = d - c;
     let denom = cross(r, s);
@@ -358,7 +368,10 @@ fn polygon_area(points: &[DVec2]) -> f64 {
 fn polygon_centroid(points: &[DVec2]) -> DVec2 {
     let area = polygon_area(points);
     if area.abs() <= PROFILE_EPSILON {
-        let sum = points.iter().copied().fold(DVec2::ZERO, |acc, point| acc + point);
+        let sum = points
+            .iter()
+            .copied()
+            .fold(DVec2::ZERO, |acc, point| acc + point);
         return sum / points.len().max(1) as f64;
     }
 
@@ -376,7 +389,9 @@ fn polygon_centroid(points: &[DVec2]) -> DVec2 {
 
 fn polygon_contains_point(points: &[DVec2], point: DVec2) -> bool {
     for i in 0..points.len() {
-        if distance_point_segment(point, points[i], points[(i + 1) % points.len()]) <= PROFILE_EPSILON {
+        if distance_point_segment(point, points[i], points[(i + 1) % points.len()])
+            <= PROFILE_EPSILON
+        {
             return true;
         }
     }
@@ -425,7 +440,7 @@ mod tests {
     use glam::dvec2;
     use roncad_core::ids::WorkplaneId;
 
-    use super::{SketchProfile, closed_profiles, pick_closed_profile};
+    use super::{closed_profiles, pick_closed_profile, SketchProfile};
     use crate::{Sketch, SketchEntity};
 
     #[test]

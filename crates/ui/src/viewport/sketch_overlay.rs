@@ -1,7 +1,7 @@
 use egui::{Color32, Rect, Stroke};
 use roncad_core::ids::{SketchEntityId, SketchId};
 use roncad_core::selection::{Selection, SelectionItem};
-use roncad_geometry::{Project, SketchEntity};
+use roncad_geometry::{arc_sample_points, Project, SketchEntity};
 use roncad_rendering::Camera2d;
 
 use super::{screen_center, to_pos, tool_overlay, COLOR_SKETCH};
@@ -70,19 +70,30 @@ pub(super) fn paint(
                 painter.line_segment([sa, sb], stroke);
             }
             SketchEntity::Rectangle { corner_a, corner_b } => {
-                tool_overlay::paint_rect(
-                    painter,
-                    camera,
-                    center,
-                    *corner_a,
-                    *corner_b,
-                    stroke,
-                );
+                tool_overlay::paint_rect(painter, camera, center, *corner_a, *corner_b, stroke);
             }
             SketchEntity::Circle { center: c, radius } => {
                 let sc = to_pos(camera.world_to_screen(*c, center));
                 let r_px = (*radius * camera.pixels_per_mm) as f32;
                 painter.circle_stroke(sc, r_px, stroke);
+            }
+            SketchEntity::Arc {
+                center: c,
+                radius,
+                start_angle,
+                sweep_angle,
+            } => {
+                let points: Vec<_> = arc_sample_points(
+                    *c,
+                    *radius,
+                    *start_angle,
+                    *sweep_angle,
+                    std::f64::consts::PI / 48.0,
+                )
+                .into_iter()
+                .map(|point| to_pos(camera.world_to_screen(point, center)))
+                .collect();
+                painter.add(egui::Shape::line(points, stroke));
             }
         }
     }

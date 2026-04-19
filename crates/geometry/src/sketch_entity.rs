@@ -1,5 +1,5 @@
 //! Sketch entities live in their workplane's local UV space (mm).
-//! Milestone 2 ships Point, Line, Rectangle, Circle — constraints come later.
+//! Milestone 2 ships Point, Line, Rectangle, Circle, and Arc.
 
 use glam::DVec2;
 use serde::{Deserialize, Serialize};
@@ -21,6 +21,12 @@ pub enum SketchEntity {
         center: DVec2,
         radius: f64,
     },
+    Arc {
+        center: DVec2,
+        radius: f64,
+        start_angle: f64,
+        sweep_angle: f64,
+    },
 }
 
 impl SketchEntity {
@@ -30,6 +36,7 @@ impl SketchEntity {
             Self::Line { .. } => "Line",
             Self::Rectangle { .. } => "Rectangle",
             Self::Circle { .. } => "Circle",
+            Self::Arc { .. } => "Arc",
         }
     }
 }

@@ -1,5 +1,8 @@
+use std::f64::consts::PI;
+
 use egui::{Align2, FontId, Pos2, Rect, Stroke};
 use glam::DVec2;
+use roncad_geometry::{arc_mid_point, arc_sample_points};
 use roncad_rendering::Camera2d;
 use roncad_tools::{ToolManager, ToolPreview};
 
@@ -36,14 +39,10 @@ pub(super) fn paint_preview(
             paint_rect(painter, camera, center, corner_a, corner_b, stroke);
             let min = corner_a.min(corner_b);
             let max = corner_a.max(corner_b);
-            let top_mid = to_pos(camera.world_to_screen(
-                DVec2::new((min.x + max.x) * 0.5, max.y),
-                center,
-            ));
-            let right_mid = to_pos(camera.world_to_screen(
-                DVec2::new(max.x, (min.y + max.y) * 0.5),
-                center,
-            ));
+            let top_mid =
+                to_pos(camera.world_to_screen(DVec2::new((min.x + max.x) * 0.5, max.y), center));
+            let right_mid =
+                to_pos(camera.world_to_screen(DVec2::new(max.x, (min.y + max.y) * 0.5), center));
             paint_label(
                 painter,
                 top_mid,
@@ -77,6 +76,75 @@ pub(super) fn paint_preview(
                 preview_color,
             );
         }
+        ToolPreview::FilletHover {
+            corner,
+            trim_a,
+            trim_b,
+            center: arc_center,
+            radius,
+            start_angle,
+            sweep_angle,
+            max_radius,
+        } => {
+            let hover_color = preview_color.gamma_multiply(0.82);
+            let hover_stroke = Stroke::new(1.6, hover_color);
+            paint_fillet_geometry(
+                painter,
+                camera,
+                center,
+                trim_a,
+                trim_b,
+                arc_center,
+                radius,
+                start_angle,
+                sweep_angle,
+                hover_stroke,
+            );
+
+            let corner_pos = to_pos(camera.world_to_screen(corner, center));
+            painter.circle_stroke(corner_pos, 7.0, Stroke::new(1.3, hover_color));
+            painter.circle_filled(corner_pos, 2.0, hover_color);
+            paint_label(
+                painter,
+                corner_pos + egui::vec2(12.0, -10.0),
+                Align2::LEFT_BOTTOM,
+                &format!("Fillet\nR<= {} mm", format_length_mm(max_radius)),
+                hover_color,
+            );
+        }
+        ToolPreview::Fillet {
+            trim_a,
+            trim_b,
+            center: arc_center,
+            radius,
+            start_angle,
+            sweep_angle,
+        } => {
+            paint_fillet_geometry(
+                painter,
+                camera,
+                center,
+                trim_a,
+                trim_b,
+                arc_center,
+                radius,
+                start_angle,
+                sweep_angle,
+                stroke,
+            );
+
+            let center_pos = to_pos(camera.world_to_screen(arc_center, center));
+            let mid_world = arc_mid_point(arc_center, radius, start_angle, sweep_angle);
+            let mid_pos = to_pos(camera.world_to_screen(mid_world, center));
+            let (anchor, align) = line_label_placement(center_pos, mid_pos);
+            paint_label(
+                painter,
+                anchor,
+                align,
+                &format!("R {} mm", format_length_mm(radius)),
+                preview_color,
+            );
+        }
         ToolPreview::Measurement { start, end } => {
             let sa = to_pos(camera.world_to_screen(start, center));
             let sb = to_pos(camera.world_to_screen(end, center));
@@ -93,6 +161,41 @@ pub(super) fn paint_preview(
             );
         }
     }
+}
+
+fn paint_fillet_geometry(
+    painter: &egui::Painter,
+    camera: &Camera2d,
+    center: DVec2,
+    trim_a: (DVec2, DVec2),
+    trim_b: (DVec2, DVec2),
+    arc_center: DVec2,
+    radius: f64,
+    start_angle: f64,
+    sweep_angle: f64,
+    stroke: Stroke,
+) {
+    let trim_a_start = to_pos(camera.world_to_screen(trim_a.0, center));
+    let trim_a_end = to_pos(camera.world_to_screen(trim_a.1, center));
+    let trim_b_start = to_pos(camera.world_to_screen(trim_b.0, center));
+    let trim_b_end = to_pos(camera.world_to_screen(trim_b.1, center));
+    painter.line_segment([trim_a_start, trim_a_end], stroke);
+    painter.line_segment([trim_b_start, trim_b_end], stroke);
+
+    let arc_points: Vec<_> =
+        arc_sample_points(arc_center, radius, start_angle, sweep_angle, PI / 48.0)
+            .into_iter()
+            .map(|point| to_pos(camera.world_to_screen(point, center)))
+            .collect();
+    paint_polyline(painter, &arc_points, stroke);
+
+    let center_pos = to_pos(camera.world_to_screen(arc_center, center));
+    let mid_world = arc_mid_point(arc_center, radius, start_angle, sweep_angle);
+    let mid_pos = to_pos(camera.world_to_screen(mid_world, center));
+    painter.line_segment([center_pos, mid_pos], stroke);
+    paint_point_marker(painter, trim_a_end, stroke);
+    paint_point_marker(painter, trim_b_end, stroke);
+    paint_point_marker(painter, center_pos, stroke);
 }
 
 pub(super) fn paint_rect(
@@ -113,6 +216,12 @@ pub(super) fn paint_rect(
         let p0 = to_pos(camera.world_to_screen(corners[i], center));
         let p1 = to_pos(camera.world_to_screen(corners[(i + 1) % 4], center));
         painter.line_segment([p0, p1], stroke);
+    }
+}
+
+fn paint_polyline(painter: &egui::Painter, points: &[Pos2], stroke: Stroke) {
+    for segment in points.windows(2) {
+        painter.line_segment([segment[0], segment[1]], stroke);
     }
 }
 

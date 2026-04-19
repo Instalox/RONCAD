@@ -13,5 +13,5 @@ pub mod tool_shelf;
 pub mod toolbar;
 pub mod viewport;
 
-pub use shell::{ShellContext, ShellResponse, render_shell};
+pub use shell::{render_shell, ShellContext, ShellResponse};
 pub use theme::apply_dark_theme;

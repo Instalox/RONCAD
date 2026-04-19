@@ -5,15 +5,11 @@
 use glam::DVec2;
 use roncad_core::ids::SketchEntityId;
 
-use crate::{Sketch, SketchEntity};
+use crate::{distance_to_arc, Sketch, SketchEntity};
 
 /// Hit-test the sketch. Returns the id of the nearest entity whose visible
 /// geometry lies within `tolerance_mm` of `world`, or None.
-pub fn pick_entity(
-    sketch: &Sketch,
-    world: DVec2,
-    tolerance_mm: f64,
-) -> Option<SketchEntityId> {
+pub fn pick_entity(sketch: &Sketch, world: DVec2, tolerance_mm: f64) -> Option<SketchEntityId> {
     let mut best: Option<(SketchEntityId, f64)> = None;
     for (id, entity) in sketch.iter() {
         let d = distance_to_entity(entity, world);
@@ -40,6 +36,12 @@ pub fn distance_to_entity(entity: &SketchEntity, p: DVec2) -> f64 {
                 .fold(f64::INFINITY, f64::min)
         }
         SketchEntity::Circle { center, radius } => (p.distance(*center) - *radius).abs(),
+        SketchEntity::Arc {
+            center,
+            radius,
+            start_angle,
+            sweep_angle,
+        } => distance_to_arc(p, *center, *radius, *start_angle, *sweep_angle),
     }
 }
 

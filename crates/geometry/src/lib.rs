@@ -1,6 +1,8 @@
 //! Authoritative domain model: sketches, constraints, bodies, features.
 //! No UI, no rendering, no file I/O dependencies.
 
+pub mod arc;
+pub mod fillet;
 pub mod pick;
 pub mod profile;
 pub mod project;
@@ -9,8 +11,16 @@ pub mod sketch_dimension;
 pub mod sketch_entity;
 pub mod workplane;
 
+pub use arc::{
+    arc_contains_angle, arc_end_angle, arc_end_point, arc_mid_point, arc_point, arc_sample_points,
+    arc_start_point, distance_to_arc,
+};
+pub use fillet::{
+    apply_line_fillet, fillet_candidate_for_lines, find_line_fillet_candidate,
+    LineFilletApplyResult, LineFilletCandidate, LineFilletPreview,
+};
 pub use pick::{distance_to_entity, pick_entity};
-pub use profile::{SketchProfile, closed_profiles, pick_closed_profile};
+pub use profile::{closed_profiles, pick_closed_profile, SketchProfile};
 pub use project::Project;
 pub use sketch::Sketch;
 pub use sketch_dimension::SketchDimension;
