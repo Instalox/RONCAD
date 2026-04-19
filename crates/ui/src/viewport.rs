@@ -13,16 +13,14 @@ mod tool_overlay;
 
 use egui::{CentralPanel, Color32, Frame, Pos2, Rect, Sense, Ui};
 use glam::DVec2;
-use roncad_core::ids::{SketchEntityId, SketchId};
-use roncad_geometry::SketchProfile;
+use roncad_geometry::HoverTarget;
 
 use crate::shell::{ShellContext, ShellResponse};
 use crate::theme::ThemeColors;
 
 #[derive(Default)]
 pub struct ViewportInteractionState {
-    pub hovered_entity: Option<(SketchId, SketchEntityId)>,
-    pub hovered_profile: Option<SketchProfile>,
+    pub hovered_target: Option<HoverTarget>,
 }
 
 pub(super) const COLOR_SKETCH: Color32 = Color32::from_rgb(0xE0, 0xE4, 0xEA);
@@ -55,7 +53,7 @@ pub fn render(
                 shell.camera,
                 shell.project,
                 shell.selection,
-                interaction.hovered_entity,
+                interaction.hovered_target.as_ref(),
             );
             dimension_overlay::paint(
                 ui.painter(),
@@ -68,11 +66,14 @@ pub fn render(
                 ui.painter(),
                 rect,
                 shell.camera,
-                interaction.hovered_profile.as_ref(),
+                interaction
+                    .hovered_target
+                    .as_ref()
+                    .and_then(HoverTarget::as_profile),
             );
             snap_overlay::paint(ui.painter(), rect, shell.camera, shell.snap_result.as_ref());
             tool_overlay::paint_preview(ui.painter(), rect, shell.camera, shell.tool_manager);
-            hud_overlay::paint(ui, rect, shell, interaction.hovered_entity);
+            hud_overlay::paint(ui, rect, shell, interaction.hovered_target.as_ref());
             dynamic_overlay::paint(ui, rect, shell);
         });
 }

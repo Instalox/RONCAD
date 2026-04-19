@@ -1,7 +1,6 @@
 use egui::{Color32, Rect, Stroke};
-use roncad_core::ids::{SketchEntityId, SketchId};
 use roncad_core::selection::{Selection, SelectionItem};
-use roncad_geometry::{arc_sample_points, Project, SketchEntity};
+use roncad_geometry::{arc_sample_points, HoverTarget, Project, SketchEntity};
 use roncad_rendering::Camera2d;
 
 use super::{screen_center, to_pos, tool_overlay, COLOR_SKETCH};
@@ -15,7 +14,7 @@ pub(super) fn paint(
     camera: &Camera2d,
     project: &Project,
     selection: &Selection,
-    hovered_entity: Option<(SketchId, SketchEntityId)>,
+    hovered_target: Option<&HoverTarget>,
 ) {
     let Some(sketch_id) = project.active_sketch else {
         return;
@@ -30,7 +29,8 @@ pub(super) fn paint(
             sketch: sketch_id,
             entity: entity_id,
         });
-        let hovered = hovered_entity == Some((sketch_id, entity_id));
+        let hovered =
+            hovered_target.is_some_and(|target| target.matches_sketch_entity(sketch_id, entity_id));
         let color = if selected {
             ThemeColors::ACCENT
         } else if hovered {

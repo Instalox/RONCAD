@@ -3,6 +3,7 @@
 
 pub mod arc;
 pub mod fillet;
+pub mod hover_target;
 pub mod pick;
 pub mod profile;
 pub mod project;
@@ -19,6 +20,7 @@ pub use fillet::{
     apply_line_fillet, fillet_candidate_for_lines, find_line_fillet_candidate,
     LineFilletApplyResult, LineFilletCandidate, LineFilletPreview,
 };
+pub use hover_target::HoverTarget;
 pub use pick::{distance_to_entity, pick_entity};
 pub use profile::{closed_profiles, pick_closed_profile, SketchProfile};
 pub use project::Project;

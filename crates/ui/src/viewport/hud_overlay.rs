@@ -1,5 +1,5 @@
 use egui::{Color32, Pos2, Rect, Ui};
-use roncad_core::ids::{SketchEntityId, SketchId};
+use roncad_geometry::HoverTarget;
 
 use crate::dimensions;
 use crate::shell::ShellContext;
@@ -9,7 +9,7 @@ pub(super) fn paint(
     ui: &mut Ui,
     rect: Rect,
     shell: &ShellContext<'_>,
-    hovered_entity: Option<(SketchId, SketchEntityId)>,
+    hovered_target: Option<&HoverTarget>,
 ) {
     let painter = ui.painter_at(rect);
     let pad = 8.0;
@@ -32,7 +32,7 @@ pub(super) fn paint(
         accent.gamma_multiply(0.85),
     );
 
-    if let Some(hover_text) = dimensions::hovered_entity_summary(shell.project, hovered_entity) {
+    if let Some(hover_text) = dimensions::hovered_target_summary(shell.project, hovered_target) {
         let font = egui::FontId::monospace(11.0);
         let shadow = Pos2::new(rect.min.x + pad + 1.0, rect.min.y + pad + 21.0);
         let anchor = Pos2::new(rect.min.x + pad, rect.min.y + pad + 20.0);

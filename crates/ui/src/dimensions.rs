@@ -3,10 +3,10 @@
 
 use egui::{Align2, Color32, Vec2};
 use glam::DVec2;
-use roncad_core::ids::{SketchEntityId, SketchId};
 use roncad_core::selection::{Selection, SelectionItem};
 use roncad_geometry::{
-    arc_end_point, arc_mid_point, arc_start_point, Project, SketchDimension, SketchEntity,
+    arc_end_point, arc_mid_point, arc_start_point, HoverTarget, Project, SketchDimension,
+    SketchEntity,
 };
 
 use crate::theme::ThemeColors;
@@ -74,49 +74,55 @@ pub(crate) fn active_sketch_dimension_annotations(project: &Project) -> Vec<Dime
         .collect()
 }
 
-pub(crate) fn hovered_entity_summary(
+pub(crate) fn hovered_target_summary(
     project: &Project,
-    hovered: Option<(SketchId, SketchEntityId)>,
+    hovered: Option<&HoverTarget>,
 ) -> Option<String> {
-    let (sketch_id, entity_id) = hovered?;
-    let sketch = project.sketches.get(sketch_id)?;
-    let entity = sketch.entities.get(entity_id)?;
+    match hovered? {
+        HoverTarget::SketchEntity { sketch, entity } => {
+            let sketch = project.sketches.get(*sketch)?;
+            let entity = sketch.entities.get(*entity)?;
 
-    Some(match entity {
-        SketchEntity::Point { p } => {
-            format!(
-                "Hover Point   X {}   Y {}",
-                format_value(p.x),
-                format_value(p.y)
-            )
+            Some(match entity {
+                SketchEntity::Point { p } => {
+                    format!(
+                        "Hover Point   X {}   Y {}",
+                        format_value(p.x),
+                        format_value(p.y)
+                    )
+                }
+                SketchEntity::Line { a, b } => {
+                    format!("Hover Line   L {}", format_mm(a.distance(*b)))
+                }
+                SketchEntity::Rectangle { corner_a, corner_b } => {
+                    let min = corner_a.min(*corner_b);
+                    let max = corner_a.max(*corner_b);
+                    format!(
+                        "Hover Rectangle   W {}   H {}",
+                        format_mm((max.x - min.x).abs()),
+                        format_mm((max.y - min.y).abs()),
+                    )
+                }
+                SketchEntity::Circle { radius, .. } => {
+                    format!("Hover Circle   R {}", format_mm(*radius))
+                }
+                SketchEntity::Arc {
+                    radius,
+                    sweep_angle,
+                    ..
+                } => {
+                    format!(
+                        "Hover Arc   R {}   A {:.1} deg",
+                        format_mm(*radius),
+                        sweep_angle.to_degrees().abs(),
+                    )
+                }
+            })
         }
-        SketchEntity::Line { a, b } => {
-            format!("Hover Line   L {}", format_mm(a.distance(*b)))
+        HoverTarget::Profile { profile, .. } => {
+            Some(format!("Hover Profile   A {:.3} mm^2", profile.area()))
         }
-        SketchEntity::Rectangle { corner_a, corner_b } => {
-            let min = corner_a.min(*corner_b);
-            let max = corner_a.max(*corner_b);
-            format!(
-                "Hover Rectangle   W {}   H {}",
-                format_mm((max.x - min.x).abs()),
-                format_mm((max.y - min.y).abs()),
-            )
-        }
-        SketchEntity::Circle { radius, .. } => {
-            format!("Hover Circle   R {}", format_mm(*radius))
-        }
-        SketchEntity::Arc {
-            radius,
-            sweep_angle,
-            ..
-        } => {
-            format!(
-                "Hover Arc   R {}   A {:.1} deg",
-                format_mm(*radius),
-                sweep_angle.to_degrees().abs(),
-            )
-        }
-    })
+    }
 }
 
 fn describe_entity(entity: &SketchEntity) -> EntityDimensions {
@@ -306,10 +312,10 @@ fn format_value(value_mm: f64) -> String {
 mod tests {
     use glam::dvec2;
     use roncad_core::selection::{Selection, SelectionItem};
-    use roncad_geometry::{Project, SketchDimension, SketchEntity};
+    use roncad_geometry::{HoverTarget, Project, SketchDimension, SketchEntity};
 
     use super::{
-        active_sketch_dimension_annotations, hovered_entity_summary, selected_entity_dimensions,
+        active_sketch_dimension_annotations, hovered_target_summary, selected_entity_dimensions,
     };
     use crate::theme::ThemeColors;
 
@@ -394,11 +400,35 @@ mod tests {
                     corner_b: dvec2(12.0, 9.0),
                 });
 
-        let summary = hovered_entity_summary(&project, Some((sketch, entity)));
+        let summary =
+            hovered_target_summary(&project, Some(&HoverTarget::sketch_entity(sketch, entity)));
 
         assert_eq!(
             summary.as_deref(),
             Some("Hover Rectangle   W 10.000 mm   H 6.000 mm")
         );
+    }
+
+    #[test]
+    fn hovered_profile_reports_area_summary() {
+        let mut project = Project::new_untitled();
+        let sketch = project.active_sketch.expect("default sketch");
+        project
+            .active_sketch_mut()
+            .expect("active sketch")
+            .add(SketchEntity::Circle {
+                center: dvec2(10.0, 10.0),
+                radius: 4.0,
+            });
+        let profile = roncad_geometry::pick_closed_profile(
+            project.active_sketch().expect("active sketch"),
+            dvec2(10.0, 10.0),
+        )
+        .expect("profile");
+
+        let summary =
+            hovered_target_summary(&project, Some(&HoverTarget::profile(sketch, profile)));
+
+        assert_eq!(summary.as_deref(), Some("Hover Profile   A 50.265 mm^2"));
     }
 }

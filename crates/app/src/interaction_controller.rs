@@ -6,8 +6,7 @@
 use egui::{Key, PointerButton, Pos2, Rect, Ui};
 use glam::DVec2;
 use roncad_core::command::AppCommand;
-use roncad_core::ids::{SketchEntityId, SketchId};
-use roncad_geometry::{pick_closed_profile, pick_entity};
+use roncad_geometry::{pick_closed_profile, pick_entity, HoverTarget};
 use roncad_tools::{
     ActiveToolKind, Modifiers, SnapEngine, SnapResult, ToolContext, ENTITY_PICK_RADIUS_PX,
 };
@@ -43,8 +42,7 @@ pub fn handle_viewport_interaction(
         pixels_per_mm: shell.camera.pixels_per_mm,
         modifiers,
     };
-    let hovered_entity = hovered_selectable_entity(raw_cursor_world, active_kind, &ctx);
-    let hovered_profile = hovered_closed_profile(raw_cursor_world, active_kind, &ctx);
+    let hovered_target = hovered_target(raw_cursor_world, active_kind, &ctx);
     let snap_result = raw_cursor_world
         .and_then(|world| active_snap_result(world, active_kind, shell.snap_engine, &ctx));
     *shell.snap_result = snap_result;
@@ -104,10 +102,7 @@ pub fn handle_viewport_interaction(
         }
     }
 
-    ViewportInteractionState {
-        hovered_entity,
-        hovered_profile,
-    }
+    ViewportInteractionState { hovered_target }
 }
 
 fn active_snap_result(
@@ -124,34 +119,29 @@ fn active_snap_result(
     }
 }
 
-fn hovered_selectable_entity(
+fn hovered_target(
     raw_world: Option<DVec2>,
     active_kind: ActiveToolKind,
     ctx: &ToolContext<'_>,
-) -> Option<(SketchId, SketchEntityId)> {
-    if active_kind != ActiveToolKind::Select {
-        return None;
+) -> Option<HoverTarget> {
+    match active_kind {
+        ActiveToolKind::Select => {
+            let sketch_id = ctx.active_sketch?;
+            let sketch = ctx.sketch?;
+            let world = raw_world?;
+            let tolerance_mm = ENTITY_PICK_RADIUS_PX / ctx.pixels_per_mm.max(f64::EPSILON);
+            pick_entity(sketch, world, tolerance_mm)
+                .map(|entity| HoverTarget::sketch_entity(sketch_id, entity))
+        }
+        ActiveToolKind::Extrude => {
+            let sketch_id = ctx.active_sketch?;
+            let sketch = ctx.sketch?;
+            let world = raw_world?;
+            pick_closed_profile(sketch, world)
+                .map(|profile| HoverTarget::profile(sketch_id, profile))
+        }
+        _ => None,
     }
-
-    let sketch_id = ctx.active_sketch?;
-    let sketch = ctx.sketch?;
-    let world = raw_world?;
-    let tolerance_mm = ENTITY_PICK_RADIUS_PX / ctx.pixels_per_mm.max(f64::EPSILON);
-    pick_entity(sketch, world, tolerance_mm).map(|entity| (sketch_id, entity))
-}
-
-fn hovered_closed_profile(
-    raw_world: Option<DVec2>,
-    active_kind: ActiveToolKind,
-    ctx: &ToolContext<'_>,
-) -> Option<roncad_geometry::SketchProfile> {
-    if active_kind != ActiveToolKind::Extrude {
-        return None;
-    }
-
-    let sketch = ctx.sketch?;
-    let world = raw_world?;
-    pick_closed_profile(sketch, world)
 }
 
 fn tool_uses_snap(kind: ActiveToolKind) -> bool {
