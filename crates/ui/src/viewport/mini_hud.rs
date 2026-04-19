@@ -97,7 +97,16 @@ pub(super) fn paint(
                         ui.add_space(2.0);
 
                         for (index, field) in fields.iter().enumerate() {
-                            render_field(ui, shell.hud_state, index, field, &selected, response);
+                            ui.push_id(("mini_hud_field", index), |ui| {
+                                render_field(
+                                    ui,
+                                    shell.hud_state,
+                                    index,
+                                    field,
+                                    &selected,
+                                    response,
+                                );
+                            });
                         }
 
                         ui.add_space(2.0);
@@ -255,6 +264,7 @@ fn render_field(
             ui.colored_label(ThemeColors::TEXT_DIM, field.unit);
             let text_edit = ui.add(
                 egui::TextEdit::singleline(buffer)
+                    .id_salt(("mini_hud_field", index))
                     .desired_width(80.0)
                     .font(egui::FontId::monospace(12.0))
                     .background_color(ThemeColors::BG_PANEL_ALT_GLASS)

@@ -37,8 +37,11 @@ pub fn render_inspector_section(
                 RichText::new("Selection details are not available for this item yet.").size(12.0),
             );
         } else {
-            for entity in selection_dimensions {
-                entity_card(ui, &entity);
+            let total = selection_dimensions.len();
+            for (index, entity) in selection_dimensions.iter().enumerate() {
+                ui.push_id(("selection_entity", index), |ui| {
+                    entity_card(ui, entity, index, total);
+                });
             }
         }
     }
@@ -49,7 +52,7 @@ pub fn render_inspector_section(
     active_tool_block(ui, shell);
 }
 
-fn entity_card(ui: &mut Ui, entity: &EntityDimensions) {
+fn entity_card(ui: &mut Ui, entity: &EntityDimensions, index: usize, total: usize) {
     Frame::new()
         .fill(ThemeColors::BG_PANEL_ALT)
         .stroke(Stroke::new(1.0, ThemeColors::SEPARATOR_SOFT))
@@ -62,10 +65,23 @@ fn entity_card(ui: &mut Ui, entity: &EntityDimensions) {
                         .size(12.5)
                         .strong(),
                 );
+                ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
+                    if total > 1 {
+                        inline_tag(
+                            ui,
+                            &format!("{}/{}", index + 1, total),
+                            ThemeColors::TEXT_DIM,
+                        );
+                        ui.add_space(6.0);
+                    }
+                    inline_tag(ui, &entity.tag, ThemeColors::TEXT_DIM);
+                });
             });
             ui.add_space(4.0);
-            for value in &entity.summary {
-                property_row(ui, value.label, &format_dimension_value(value));
+            for (index, value) in entity.summary.iter().enumerate() {
+                ui.push_id(("entity_property", index), |ui| {
+                    property_row(ui, value.label, &format_dimension_value(value));
+                });
             }
         });
 }
@@ -77,10 +93,17 @@ fn active_tool_block(ui: &mut Ui, shell: &ShellContext<'_>) {
         .stroke(Stroke::new(1.0, ThemeColors::SEPARATOR_SOFT))
         .inner_margin(Margin::symmetric(8, 8))
         .show(ui, |ui| {
-            ui.colored_label(
-                ThemeColors::TEXT_DIM,
-                RichText::new("Active tool").size(11.0),
-            );
+            ui.horizontal(|ui| {
+                ui.colored_label(
+                    ThemeColors::TEXT_DIM,
+                    RichText::new("Active tool").size(11.0),
+                );
+                ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
+                    if let Some(shortcut) = active.shortcut() {
+                        inline_tag(ui, shortcut, ThemeColors::tool_accent(active));
+                    }
+                });
+            });
             ui.add_space(2.0);
             ui.colored_label(
                 ThemeColors::tool_accent(active),
@@ -92,6 +115,16 @@ fn active_tool_block(ui: &mut Ui, shell: &ShellContext<'_>) {
                     .color(ThemeColors::TEXT_DIM)
                     .size(11.5),
             );
+        });
+}
+
+fn inline_tag(ui: &mut Ui, text: &str, color: egui::Color32) {
+    Frame::new()
+        .fill(ThemeColors::BG_DEEP)
+        .stroke(Stroke::new(1.0, ThemeColors::SEPARATOR_SOFT))
+        .inner_margin(Margin::symmetric(6, 2))
+        .show(ui, |ui| {
+            ui.colored_label(color, RichText::new(text).monospace().size(10.5));
         });
 }
 

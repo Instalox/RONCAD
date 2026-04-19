@@ -1,7 +1,7 @@
 //! Bottom status bar: coordinates, zoom level, active-tool hint.
 
-use egui::{Panel, Ui};
-use roncad_tools::ToolPreview;
+use egui::{Frame, Margin, Panel, RichText, Stroke, Ui};
+use roncad_tools::{ActiveToolKind, ToolPreview};
 
 use crate::shell::{ShellContext, ShellResponse};
 use crate::theme::ThemeColors;
@@ -9,47 +9,120 @@ use crate::theme::ThemeColors;
 pub fn render(ui: &mut Ui, shell: &ShellContext<'_>, _response: &mut ShellResponse) {
     Panel::bottom("status_bar")
         .exact_size(24.0)
+        .frame(
+            Frame::new()
+                .fill(ThemeColors::BG_PANEL)
+                .stroke(Stroke::new(1.0, ThemeColors::SEPARATOR))
+                .inner_margin(Margin::symmetric(10, 4)),
+        )
         .show_inside(ui, |ui| {
-            ui.horizontal(|ui| {
-                ui.add_space(6.0);
-                let kind = shell.tool_manager.active_kind();
-                ui.colored_label(ThemeColors::TEXT_DIM, "Mode");
-                ui.colored_label(ThemeColors::tool_accent(kind), kind.label());
+            let kind = shell.tool_manager.active_kind();
+            ui.spacing_mut().item_spacing = egui::vec2(8.0, 0.0);
 
-                ui.separator();
-                match shell.cursor_world_mm.as_ref() {
-                    Some(p) => ui.colored_label(
-                        ThemeColors::TEXT,
-                        format!("X {:>8.3} mm   Y {:>8.3} mm", p.x, p.y),
-                    ),
-                    None => ui.colored_label(ThemeColors::TEXT_DIM, "X —   Y —"),
-                };
-
-                if let Some(snap) = shell.snap_result.as_ref() {
-                    if let Some(kind) = snap.kind {
-                        ui.separator();
-                        ui.colored_label(ThemeColors::TEXT_DIM, "Snap");
-                        ui.colored_label(ThemeColors::ACCENT, kind.label());
-                    }
-                }
-
-                ui.separator();
-                ui.colored_label(ThemeColors::TEXT_DIM, shell.tool_manager.step_hint());
-
-                if let Some(summary) = preview_summary(shell.tool_manager.preview()) {
-                    ui.separator();
-                    ui.colored_label(ThemeColors::tool_accent(kind), summary);
-                }
-
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.add_space(6.0);
-                    ui.colored_label(
-                        ThemeColors::TEXT_DIM,
-                        format!("Zoom {:.2} px/mm", shell.camera.pixels_per_mm),
+            ui.push_id("status_bar_row", |ui| {
+                ui.horizontal(|ui| {
+                    status_pair(
+                        ui,
+                        "Mode",
+                        kind.label(),
+                        ThemeColors::tool_accent(kind),
+                        false,
                     );
+                    status_sep(ui);
+
+                    match shell.cursor_world_mm.as_ref() {
+                        Some(p) => {
+                            status_metric(ui, "X", &format!("{:.3}", p.x), "mm");
+                            status_metric(ui, "Y", &format!("{:.3}", p.y), "mm");
+                        }
+                        None => {
+                            status_pair(ui, "X", "-", ThemeColors::TEXT_DIM, true);
+                            status_pair(ui, "Y", "-", ThemeColors::TEXT_DIM, true);
+                        }
+                    }
+
+                    if let Some(snap) = shell.snap_result.as_ref() {
+                        if let Some(kind) = snap.kind {
+                            status_sep(ui);
+                            status_pair(ui, "Snap", kind.label(), ThemeColors::ACCENT, false);
+                        }
+                    }
+
+                    if let Some((info, color)) = status_context(shell) {
+                        status_sep(ui);
+                        ui.label(RichText::new(info).size(11.5).color(color));
+                    }
+
+                    ui.push_id("status_bar_metrics", |ui| {
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            status_pair(ui, "Units", "mm", ThemeColors::TEXT, false);
+                            status_sep(ui);
+                            status_metric(
+                                ui,
+                                "Zoom",
+                                &format!("{:.2}", shell.camera.pixels_per_mm),
+                                "px/mm",
+                            );
+                        });
+                    });
                 });
             });
         });
+}
+
+fn status_context(shell: &ShellContext<'_>) -> Option<(String, egui::Color32)> {
+    let kind = shell.tool_manager.active_kind();
+    if let Some(summary) = preview_summary(shell.tool_manager.preview()) {
+        return Some((summary, ThemeColors::tool_accent(kind)));
+    }
+    if !shell.selection.is_empty() {
+        return Some((
+            format!("{} selected", shell.selection.len()),
+            ThemeColors::TEXT_MID,
+        ));
+    }
+
+    let hint = status_hint(kind, !shell.tool_manager.dynamic_fields().is_empty());
+    (!hint.is_empty()).then_some((hint.to_string(), ThemeColors::TEXT_DIM))
+}
+
+fn status_hint(kind: ActiveToolKind, dynamic_active: bool) -> &'static str {
+    match kind {
+        ActiveToolKind::Select => "Click or box-select",
+        ActiveToolKind::Pan => "Drag to pan",
+        ActiveToolKind::Line if dynamic_active => "Tab or Enter edits",
+        ActiveToolKind::Line => "Click first point",
+        ActiveToolKind::Rectangle if dynamic_active => "Type width and height",
+        ActiveToolKind::Rectangle => "Click first corner",
+        ActiveToolKind::Circle if dynamic_active => "Type radius",
+        ActiveToolKind::Circle => "Click center",
+        ActiveToolKind::Arc => "Center, start, end",
+        ActiveToolKind::Fillet => "Pick corner, then radius",
+        ActiveToolKind::Dimension => "Pick points to dimension",
+        ActiveToolKind::Extrude => "Pick a closed profile",
+    }
+}
+
+fn status_metric(ui: &mut Ui, label: &str, value: &str, unit: &str) {
+    status_pair(ui, label, value, ThemeColors::TEXT, true);
+    ui.colored_label(ThemeColors::TEXT_DIM, RichText::new(unit).size(10.5));
+}
+
+fn status_pair(ui: &mut Ui, label: &str, value: &str, color: egui::Color32, monospace: bool) {
+    ui.colored_label(ThemeColors::TEXT_DIM, RichText::new(label).size(10.5));
+    let text = RichText::new(value).size(11.5).color(color);
+    if monospace {
+        ui.label(text.monospace());
+    } else {
+        ui.label(text);
+    }
+}
+
+fn status_sep(ui: &mut Ui) {
+    ui.colored_label(
+        ThemeColors::TEXT_FAINT,
+        RichText::new("|").monospace().size(10.5),
+    );
 }
 
 fn preview_summary(preview: ToolPreview) -> Option<String> {

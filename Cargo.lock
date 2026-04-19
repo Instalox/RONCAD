@@ -2053,6 +2053,7 @@ dependencies = [
  "roncad-geometry",
  "roncad-rendering",
  "roncad-tools",
+ "slotmap",
 ]
 
 [[package]]

@@ -33,41 +33,45 @@ pub(super) fn paint(
                 .corner_radius(3.0_f32)
                 .show(ui, |ui| {
                     ui.spacing_mut().item_spacing = egui::vec2(6.0, 4.0);
-                    ui.vertical(|ui| {
-                        ui.horizontal_wrapped(|ui| {
-                            ui.colored_label(
-                                accent,
-                                RichText::new(kind.label()).size(11.5).strong(),
-                            );
-                            hud_sep(ui);
-                            ui.colored_label(
-                                ThemeColors::TEXT_MID,
-                                RichText::new(shell.tool_manager.step_hint()).size(11.5),
-                            );
+                    ui.push_id("viewport_hint_content", |ui| {
+                        ui.vertical(|ui| {
+                            ui.push_id("viewport_hint_row", |ui| {
+                                ui.horizontal_wrapped(|ui| {
+                                    ui.colored_label(
+                                        accent,
+                                        RichText::new(kind.label()).size(11.5).strong(),
+                                    );
+                                    hud_sep(ui);
+                                    ui.colored_label(
+                                        ThemeColors::TEXT_MID,
+                                        RichText::new(shell.tool_manager.step_hint()).size(11.5),
+                                    );
 
-                            if !shell.tool_manager.dynamic_fields().is_empty() {
-                                hud_sep(ui);
-                                hud_segment(ui, "Tab", "fields");
-                                hud_segment(ui, "Enter", "commit");
+                                    if !shell.tool_manager.dynamic_fields().is_empty() {
+                                        hud_sep(ui);
+                                        hud_segment(ui, "Tab", "fields");
+                                        hud_segment(ui, "Enter", "commit");
+                                    }
+
+                                    if let Some((key, label)) = modifier_hint(kind) {
+                                        hud_sep(ui);
+                                        hud_segment(ui, key, label);
+                                    }
+
+                                    hud_sep(ui);
+                                    hud_segment(ui, "middle", "pan");
+                                    hud_segment(ui, "scroll", "zoom");
+                                });
+                            });
+
+                            if let Some(hover_text) = hover_text.as_deref() {
+                                ui.add_space(1.0);
+                                ui.colored_label(
+                                    ThemeColors::ACCENT_AMBER,
+                                    RichText::new(hover_text).monospace().size(10.5),
+                                );
                             }
-
-                            if let Some((key, label)) = modifier_hint(kind) {
-                                hud_sep(ui);
-                                hud_segment(ui, key, label);
-                            }
-
-                            hud_sep(ui);
-                            hud_segment(ui, "middle", "pan");
-                            hud_segment(ui, "scroll", "zoom");
                         });
-
-                        if let Some(hover_text) = hover_text.as_deref() {
-                            ui.add_space(1.0);
-                            ui.colored_label(
-                                ThemeColors::ACCENT_AMBER,
-                                RichText::new(hover_text).monospace().size(10.5),
-                            );
-                        }
                     });
                 });
         });

@@ -17,3 +17,4 @@ roncad-tools.workspace = true
 egui.workspace = true
 egui-phosphor.workspace = true
 glam.workspace = true
+slotmap.workspace = true

@@ -53,8 +53,10 @@ pub(super) fn paint(ui: &mut Ui, rect: Rect, shell: &ShellContext<'_>) {
                     ui.set_min_width(hud_size.x);
                     ui.set_max_width(hud_size.x);
                     ui.vertical(|ui| {
-                        for view in &views {
-                            render_row(ui, view, accent);
+                        for (index, view) in views.iter().enumerate() {
+                            ui.push_id(("dynamic_field", index), |ui| {
+                                render_row(ui, view, accent);
+                            });
                         }
                         ui.add_space(1.0);
                         ui.colored_label(

@@ -57,6 +57,7 @@ impl ActiveToolKind {
     pub fn shortcut(self) -> Option<&'static str> {
         match self {
             Self::Select => Some("V"),
+            Self::Pan => Some("H"),
             Self::Line => Some("L"),
             Self::Rectangle => Some("R"),
             Self::Circle => Some("C"),
@@ -64,7 +65,6 @@ impl ActiveToolKind {
             Self::Fillet => Some("F"),
             Self::Dimension => Some("D"),
             Self::Extrude => Some("E"),
-            Self::Pan => None,
         }
     }
 }

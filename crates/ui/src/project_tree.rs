@@ -16,66 +16,74 @@ pub fn render_browser_section(ui: &mut Ui, shell: &ShellContext<'_>, response: &
 
     tree_group(ui, "Origin");
     for (_, plane) in shell.project.workplanes.iter() {
-        let _ = tree_row(
-            ui,
-            TreeRow {
-                depth: 1,
-                glyph: ph::SQUARE,
-                label: format!("{} plane", plane.name),
-                count: None,
-                selected: false,
-                muted: false,
-            },
-        );
+        ui.push_id(("workplane_row", plane.name.as_str()), |ui| {
+            let _ = tree_row(
+                ui,
+                TreeRow {
+                    depth: 1,
+                    glyph: ph::SQUARE,
+                    label: format!("{} plane", plane.name),
+                    count: None,
+                    selected: false,
+                    muted: false,
+                },
+            );
+        });
     }
 
     ui.add_space(2.0);
     tree_group(ui, "Sketches");
     if shell.project.sketches.is_empty() {
+        ui.push_id("empty_sketches", |ui| {
+            let _ = tree_row(
+                ui,
+                TreeRow {
+                    depth: 1,
+                    glyph: ph::SQUARE,
+                    label: "(none yet)".to_string(),
+                    count: None,
+                    selected: false,
+                    muted: true,
+                },
+            );
+        });
+    } else {
+        for (id, sketch) in shell.project.sketches.iter() {
+            ui.push_id(("sketch_row", id), |ui| {
+                let active = shell.project.active_sketch == Some(id);
+                let row = tree_row(
+                    ui,
+                    TreeRow {
+                        depth: 1,
+                        glyph: ph::DISC,
+                        label: sketch.name.clone(),
+                        count: Some(entity_summary(sketch.entities.len())),
+                        selected: active,
+                        muted: false,
+                    },
+                );
+                if row.clicked() && !active {
+                    response.commands.push(AppCommand::SetActiveSketch(id));
+                }
+            });
+        }
+    }
+
+    ui.add_space(2.0);
+    tree_group(ui, "Bodies");
+    ui.push_id("empty_bodies", |ui| {
         let _ = tree_row(
             ui,
             TreeRow {
                 depth: 1,
-                glyph: ph::SQUARE,
+                glyph: ph::CUBE,
                 label: "(none yet)".to_string(),
                 count: None,
                 selected: false,
                 muted: true,
             },
         );
-    } else {
-        for (id, sketch) in shell.project.sketches.iter() {
-            let active = shell.project.active_sketch == Some(id);
-            let row = tree_row(
-                ui,
-                TreeRow {
-                    depth: 1,
-                    glyph: ph::DISC,
-                    label: sketch.name.clone(),
-                    count: Some(entity_summary(sketch.entities.len())),
-                    selected: active,
-                    muted: false,
-                },
-            );
-            if row.clicked() && !active {
-                response.commands.push(AppCommand::SetActiveSketch(id));
-            }
-        }
-    }
-
-    ui.add_space(2.0);
-    tree_group(ui, "Bodies");
-    let _ = tree_row(
-        ui,
-        TreeRow {
-            depth: 1,
-            glyph: ph::CUBE,
-            label: "(none yet)".to_string(),
-            count: None,
-            selected: false,
-            muted: true,
-        },
-    );
+    });
 }
 
 struct TreeRow {
@@ -94,6 +102,7 @@ fn tree_group(ui: &mut Ui, title: &str) {
     );
     let mut row_ui = ui.new_child(
         UiBuilder::new()
+            .id_salt(("tree_group", title))
             .max_rect(rect)
             .layout(Layout::left_to_right(Align::Center)),
     );
@@ -151,6 +160,7 @@ fn tree_row(ui: &mut Ui, row: TreeRow) -> egui::Response {
     let inner = rect.shrink2(egui::vec2(6.0, 3.0));
     let mut row_ui = ui.new_child(
         UiBuilder::new()
+            .id_salt(("tree_row", row.depth, row.glyph, row.label.as_str()))
             .max_rect(inner)
             .layout(Layout::left_to_right(Align::Center)),
     );
@@ -159,8 +169,10 @@ fn tree_row(ui: &mut Ui, row: TreeRow) -> egui::Response {
     row_ui.add_space(6.0);
     row_ui.label(RichText::new(row.label).size(12.0).color(text_color));
     if let Some(count) = row.count {
-        row_ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            ui.colored_label(count_color, RichText::new(count).monospace().size(10.5));
+        row_ui.push_id("tree_row_count", |ui| {
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                ui.colored_label(count_color, RichText::new(count).monospace().size(10.5));
+            });
         });
     }
 

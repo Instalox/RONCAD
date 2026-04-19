@@ -8,6 +8,7 @@ use roncad_geometry::{
     arc_end_point, arc_mid_point, arc_start_point, HoverTarget, Project, SketchDimension,
     SketchEntity,
 };
+use slotmap::Key;
 
 use crate::theme::ThemeColors;
 
@@ -36,6 +37,7 @@ pub(crate) struct DimensionAnnotation {
 #[derive(Debug, Clone)]
 pub(crate) struct EntityDimensions {
     pub kind: &'static str,
+    pub tag: String,
     pub summary: Vec<DimensionValue>,
     pub annotations: Vec<DimensionAnnotation>,
 }
@@ -57,7 +59,7 @@ pub(crate) fn selected_entity_dimensions(
             sketch: sketch_id,
             entity: entity_id,
         }) {
-            dimensions.push(describe_entity(entity));
+            dimensions.push(describe_entity(entity_id, entity));
         }
     }
     dimensions
@@ -125,10 +127,15 @@ pub(crate) fn hovered_target_summary(
     }
 }
 
-fn describe_entity(entity: &SketchEntity) -> EntityDimensions {
+fn describe_entity(
+    entity_id: roncad_core::ids::SketchEntityId,
+    entity: &SketchEntity,
+) -> EntityDimensions {
+    let tag = entity_tag(entity_id, entity);
     match entity {
         SketchEntity::Point { p } => EntityDimensions {
             kind: entity.kind_name(),
+            tag,
             summary: vec![
                 DimensionValue {
                     label: "X",
@@ -153,6 +160,7 @@ fn describe_entity(entity: &SketchEntity) -> EntityDimensions {
             let midpoint = (*a + *b) * 0.5;
             EntityDimensions {
                 kind: entity.kind_name(),
+                tag,
                 summary: vec![DimensionValue {
                     label: "Length",
                     value_mm: length,
@@ -174,6 +182,7 @@ fn describe_entity(entity: &SketchEntity) -> EntityDimensions {
             let height = (max.y - min.y).abs();
             EntityDimensions {
                 kind: entity.kind_name(),
+                tag,
                 summary: vec![
                     DimensionValue {
                         label: "Width",
@@ -206,6 +215,7 @@ fn describe_entity(entity: &SketchEntity) -> EntityDimensions {
         }
         SketchEntity::Circle { center, radius } => EntityDimensions {
             kind: entity.kind_name(),
+            tag,
             summary: vec![
                 DimensionValue {
                     label: "Radius",
@@ -236,6 +246,7 @@ fn describe_entity(entity: &SketchEntity) -> EntityDimensions {
             let end = arc_end_point(*center, *radius, *start_angle, *sweep_angle);
             EntityDimensions {
                 kind: entity.kind_name(),
+                tag,
                 summary: vec![
                     DimensionValue {
                         label: "Radius",
@@ -271,6 +282,18 @@ fn describe_entity(entity: &SketchEntity) -> EntityDimensions {
             }
         }
     }
+}
+
+fn entity_tag(entity_id: roncad_core::ids::SketchEntityId, entity: &SketchEntity) -> String {
+    let prefix = match entity {
+        SketchEntity::Point { .. } => "p",
+        SketchEntity::Line { .. } => "l",
+        SketchEntity::Rectangle { .. } => "r",
+        SketchEntity::Circle { .. } => "c",
+        SketchEntity::Arc { .. } => "a",
+    };
+    let slot = (entity_id.data().as_ffi() & 0xffff_ffff) as u32;
+    format!("{prefix}_{:03}", slot)
 }
 
 fn describe_sketch_dimension_annotation(dimension: &SketchDimension) -> DimensionAnnotation {

@@ -227,6 +227,8 @@ fn handle_tool_shortcuts(ui: &Ui, manager: &mut roncad_tools::ToolManager) {
         }
         if input.key_pressed(Key::V) {
             Some(ActiveToolKind::Select)
+        } else if input.key_pressed(Key::H) {
+            Some(ActiveToolKind::Pan)
         } else if input.key_pressed(Key::A) {
             Some(ActiveToolKind::Arc)
         } else if input.key_pressed(Key::L) {
