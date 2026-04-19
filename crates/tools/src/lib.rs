@@ -12,6 +12,8 @@ pub mod select_tool;
 pub mod snapping;
 pub mod tool;
 
-pub use manager::ToolManager;
+pub use manager::{DynamicFieldView, DynamicFieldVisualState, DynamicInputState, ToolManager};
 pub use snapping::{SnapAxis, SnapEngine, SnapKind, SnapReference, SnapResult};
-pub use tool::{ActiveToolKind, Modifiers, Tool, ToolContext, ToolPreview, ENTITY_PICK_RADIUS_PX};
+pub use tool::{
+    ActiveToolKind, DynamicField, Modifiers, Tool, ToolContext, ToolPreview, ENTITY_PICK_RADIUS_PX,
+};

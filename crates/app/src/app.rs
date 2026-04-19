@@ -27,9 +27,6 @@ impl Default for DocumentState {
 }
 
 #[derive(Default)]
-struct UiState {}
-
-#[derive(Default)]
 struct ToolRuntimeState {
     manager: ToolManager,
     snap_engine: SnapEngine,
@@ -44,7 +41,6 @@ struct RenderCache {
 
 pub struct RonCadApp {
     document: DocumentState,
-    _ui: UiState,
     tool: ToolRuntimeState,
     render: RenderCache,
 }
@@ -54,7 +50,6 @@ impl RonCadApp {
         apply_dark_theme(&cc.egui_ctx);
         Self {
             document: DocumentState::default(),
-            _ui: UiState::default(),
             tool: ToolRuntimeState::default(),
             render: RenderCache::default(),
         }

@@ -1,7 +1,7 @@
 //! Paints the active snap marker plus lightweight reference guides so sketch
 //! inference reads directly in the viewport.
 
-use egui::{Color32, Pos2, Rect, Stroke};
+use egui::{Align2, Color32, FontId, Pos2, Rect, Stroke};
 use roncad_rendering::Camera2d;
 use roncad_tools::{SnapKind, SnapReference, SnapResult};
 
@@ -37,6 +37,28 @@ pub(super) fn paint(
             paint_alignment_marker(painter, point, snap_color(kind), kind)
         }
     }
+
+    paint_snap_label(painter, point, kind);
+}
+
+fn paint_snap_label(painter: &egui::Painter, point: Pos2, kind: SnapKind) {
+    let label = kind.label();
+    let font = FontId::proportional(10.0);
+    let anchor = point + egui::vec2(10.0, -12.0);
+    painter.text(
+        anchor + egui::vec2(1.0, 1.0),
+        Align2::LEFT_BOTTOM,
+        label,
+        font.clone(),
+        Color32::BLACK,
+    );
+    painter.text(
+        anchor,
+        Align2::LEFT_BOTTOM,
+        label,
+        font,
+        snap_color(kind).gamma_multiply(0.95),
+    );
 }
 
 fn paint_reference(

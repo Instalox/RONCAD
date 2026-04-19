@@ -3,6 +3,7 @@
 //! on left-click are routed to the ToolManager; middle/right drag pans.
 
 mod dimension_overlay;
+mod dynamic_overlay;
 mod grid_overlay;
 mod hud_overlay;
 mod profile_overlay;
@@ -52,6 +53,7 @@ pub fn render(ui: &mut Ui, shell: &mut ShellContext<'_>, response: &mut ShellRes
             snap_overlay::paint(ui.painter(), rect, shell.camera, shell.snap_result.as_ref());
             tool_overlay::paint_preview(ui.painter(), rect, shell.camera, shell.tool_manager);
             hud_overlay::paint(ui, rect, shell, hovered_entity);
+            dynamic_overlay::paint(ui, rect, shell);
         });
 }
 
@@ -97,6 +99,8 @@ fn handle_input(
         shell.tool_manager.on_pointer_move(&ctx, world);
     }
 
+    handle_dynamic_input(ui, shell, cursor_world, &ctx, response);
+
     if resp.clicked_by(PointerButton::Primary) {
         if let Some(p) = resp.interact_pointer_pos() {
             let raw_world = shell.camera.screen_to_world(pos_to_dvec(p), center);
@@ -118,7 +122,7 @@ fn handle_input(
     }
 
     if ui.ctx().input(|i| i.key_pressed(Key::Escape)) {
-        shell.tool_manager.on_escape();
+        let _ = shell.tool_manager.on_escape();
     }
 
     if resp.has_focus() && ui.ctx().input(|i| i.key_pressed(Key::Delete)) {
@@ -212,8 +216,95 @@ fn tool_uses_snap(kind: ActiveToolKind) -> bool {
     )
 }
 
+fn handle_dynamic_input(
+    ui: &Ui,
+    shell: &mut ShellContext<'_>,
+    cursor_world: Option<DVec2>,
+    ctx: &ToolContext<'_>,
+    response: &mut ShellResponse,
+) {
+    let fields = shell.tool_manager.dynamic_fields();
+    if fields.is_empty() {
+        shell.tool_manager.dynamic_input_mut().clear();
+        return;
+    }
+    shell.tool_manager.dynamic_input_mut().sync(fields.len());
+
+    // If a TextEdit (e.g., the selection mini HUD) owns the keyboard, defer.
+    // Note: egui_wants_keyboard_input is true for ANY focused widget, including
+    // our viewport response itself — we need text_edit_focused specifically.
+    if ui.ctx().text_edit_focused() {
+        return;
+    }
+
+    let shift = egui::Modifiers::SHIFT;
+    let typed_chars: Vec<char> = ui.ctx().input(|i| {
+        i.events
+            .iter()
+            .filter_map(|event| match event {
+                egui::Event::Text(text) => Some(text.as_str()),
+                _ => None,
+            })
+            .flat_map(|text| text.chars())
+            .collect()
+    });
+    let none = egui::Modifiers::NONE;
+    let (backspace, cycle_back, cycle_next, submit) = ui.ctx().input_mut(|i| {
+        (
+            i.consume_key(none, Key::Backspace),
+            i.consume_key(shift, Key::Tab),
+            i.consume_key(none, Key::Tab),
+            i.consume_key(none, Key::Enter),
+        )
+    });
+
+    {
+        let state = shell.tool_manager.dynamic_input_mut();
+        if let Some(buf) = state.active_buffer_mut() {
+            for ch in typed_chars {
+                append_typed_char(buf, ch);
+            }
+            if backspace {
+                buf.pop();
+            }
+        }
+    }
+
+    if cycle_back {
+        shell.tool_manager.dynamic_input_mut().cycle_back();
+    } else if cycle_next {
+        shell.tool_manager.dynamic_input_mut().cycle();
+    }
+    if submit {
+        if let Some(world) = cursor_world {
+            let cmds = shell.tool_manager.commit_dynamic(ctx, world);
+            response.commands.extend(cmds);
+        }
+    }
+}
+
+fn append_typed_char(buf: &mut String, ch: char) {
+    match ch {
+        '0'..='9' => buf.push(ch),
+        '.' => {
+            if !buf.contains('.') {
+                buf.push('.');
+            }
+        }
+        '-' => {
+            if buf.is_empty() {
+                buf.push('-');
+            }
+        }
+        _ => {}
+    }
+}
+
 fn handle_tool_shortcuts(ui: &Ui, manager: &mut roncad_tools::ToolManager) {
     if ui.ctx().egui_wants_keyboard_input() {
+        return;
+    }
+    if !manager.dynamic_fields().is_empty() {
         return;
     }
 

@@ -142,6 +142,99 @@ pub fn apply(project: &mut Project, selection: &mut Selection, command: &AppComm
                 });
             }
         }
+        AppCommand::SetLineLength {
+            sketch,
+            entity,
+            length,
+        } => {
+            if let Some(s) = project.sketches.get_mut(*sketch) {
+                if let Some(SketchEntity::Line { a, b }) = s.entities.get_mut(*entity) {
+                    let new_len = length.as_f64().max(0.0);
+                    let delta = *b - *a;
+                    let dir = if delta.length_squared() > 1e-20 {
+                        delta.normalize()
+                    } else {
+                        glam::DVec2::X
+                    };
+                    *b = *a + dir * new_len;
+                }
+            }
+        }
+        AppCommand::SetRectangleWidth {
+            sketch,
+            entity,
+            width,
+        } => {
+            if let Some(s) = project.sketches.get_mut(*sketch) {
+                if let Some(SketchEntity::Rectangle { corner_a, corner_b }) =
+                    s.entities.get_mut(*entity)
+                {
+                    let sign = if corner_b.x >= corner_a.x { 1.0 } else { -1.0 };
+                    corner_b.x = corner_a.x + sign * width.as_f64().max(0.0);
+                }
+            }
+        }
+        AppCommand::SetRectangleHeight {
+            sketch,
+            entity,
+            height,
+        } => {
+            if let Some(s) = project.sketches.get_mut(*sketch) {
+                if let Some(SketchEntity::Rectangle { corner_a, corner_b }) =
+                    s.entities.get_mut(*entity)
+                {
+                    let sign = if corner_b.y >= corner_a.y { 1.0 } else { -1.0 };
+                    corner_b.y = corner_a.y + sign * height.as_f64().max(0.0);
+                }
+            }
+        }
+        AppCommand::SetCircleRadius {
+            sketch,
+            entity,
+            radius,
+        } => {
+            if let Some(s) = project.sketches.get_mut(*sketch) {
+                if let Some(SketchEntity::Circle { radius: r, .. }) = s.entities.get_mut(*entity) {
+                    *r = radius.as_f64().max(0.0);
+                }
+            }
+        }
+        AppCommand::SetArcRadius {
+            sketch,
+            entity,
+            radius,
+        } => {
+            if let Some(s) = project.sketches.get_mut(*sketch) {
+                if let Some(SketchEntity::Arc { radius: r, .. }) = s.entities.get_mut(*entity) {
+                    *r = radius.as_f64().max(0.0);
+                }
+            }
+        }
+        AppCommand::SetArcSweepDegrees {
+            sketch,
+            entity,
+            sweep_degrees,
+        } => {
+            if let Some(s) = project.sketches.get_mut(*sketch) {
+                if let Some(SketchEntity::Arc { sweep_angle, .. }) = s.entities.get_mut(*entity) {
+                    *sweep_angle = sweep_degrees.to_radians();
+                }
+            }
+        }
+        AppCommand::SetPointX { sketch, entity, x } => {
+            if let Some(s) = project.sketches.get_mut(*sketch) {
+                if let Some(SketchEntity::Point { p }) = s.entities.get_mut(*entity) {
+                    p.x = *x;
+                }
+            }
+        }
+        AppCommand::SetPointY { sketch, entity, y } => {
+            if let Some(s) = project.sketches.get_mut(*sketch) {
+                if let Some(SketchEntity::Point { p }) = s.entities.get_mut(*entity) {
+                    p.y = *y;
+                }
+            }
+        }
         AppCommand::DeleteEntity { sketch, entity } => {
             if let Some(s) = project.sketches.get_mut(*sketch) {
                 s.remove(*entity);
@@ -546,6 +639,120 @@ mod tests {
             dvec2(0.0, 10.0),
             dvec2(0.0, 2.0)
         ));
+    }
+
+    #[test]
+    fn set_line_length_preserves_direction_from_start() {
+        let mut project = Project::new_untitled();
+        let mut selection = Selection::default();
+        let sketch = project.active_sketch.expect("default project has sketch");
+        let entity = project
+            .active_sketch_mut()
+            .expect("active sketch")
+            .add(SketchEntity::Line {
+                a: dvec2(1.0, 2.0),
+                b: dvec2(4.0, 6.0),
+            });
+
+        apply(
+            &mut project,
+            &mut selection,
+            &AppCommand::SetLineLength {
+                sketch,
+                entity,
+                length: LengthMm::new(10.0),
+            },
+        );
+
+        let stored = project
+            .active_sketch()
+            .expect("active sketch")
+            .entities
+            .get(entity)
+            .cloned();
+        let SketchEntity::Line { a, b } = stored.expect("line") else {
+            panic!("expected line");
+        };
+        assert_eq!(a, dvec2(1.0, 2.0));
+        assert!((a.distance(b) - 10.0).abs() < 1e-9);
+        let dir = (b - a).normalize();
+        assert!((dir - dvec2(0.6, 0.8)).length() < 1e-9);
+    }
+
+    #[test]
+    fn set_rectangle_width_preserves_anchor_and_height() {
+        let mut project = Project::new_untitled();
+        let mut selection = Selection::default();
+        let sketch = project.active_sketch.expect("default project has sketch");
+        let entity =
+            project
+                .active_sketch_mut()
+                .expect("active sketch")
+                .add(SketchEntity::Rectangle {
+                    corner_a: dvec2(2.0, 3.0),
+                    corner_b: dvec2(7.0, 9.0),
+                });
+
+        apply(
+            &mut project,
+            &mut selection,
+            &AppCommand::SetRectangleWidth {
+                sketch,
+                entity,
+                width: LengthMm::new(20.0),
+            },
+        );
+
+        let SketchEntity::Rectangle { corner_a, corner_b } = project
+            .active_sketch()
+            .expect("active sketch")
+            .entities
+            .get(entity)
+            .expect("rect")
+            .clone()
+        else {
+            panic!("expected rectangle");
+        };
+        assert_eq!(corner_a, dvec2(2.0, 3.0));
+        assert_eq!(corner_b, dvec2(22.0, 9.0));
+    }
+
+    #[test]
+    fn set_arc_sweep_converts_degrees_to_radians() {
+        let mut project = Project::new_untitled();
+        let mut selection = Selection::default();
+        let sketch = project.active_sketch.expect("default project has sketch");
+        let entity = project
+            .active_sketch_mut()
+            .expect("active sketch")
+            .add(SketchEntity::Arc {
+                center: dvec2(0.0, 0.0),
+                radius: 4.0,
+                start_angle: 0.0,
+                sweep_angle: std::f64::consts::FRAC_PI_2,
+            });
+
+        apply(
+            &mut project,
+            &mut selection,
+            &AppCommand::SetArcSweepDegrees {
+                sketch,
+                entity,
+                sweep_degrees: 45.0,
+            },
+        );
+
+        let SketchEntity::Arc { sweep_angle, .. } = project
+            .active_sketch()
+            .expect("active sketch")
+            .entities
+            .get(entity)
+            .expect("arc")
+            .clone()
+        else {
+            panic!("expected arc");
+        };
+        assert!((sweep_angle - std::f64::consts::FRAC_PI_4).abs() < 1e-9);
     }
 
     fn contains_line(lines: &[(glam::DVec2, glam::DVec2)], a: glam::DVec2, b: glam::DVec2) -> bool {

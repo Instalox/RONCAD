@@ -134,6 +134,37 @@ pub enum ToolPreview {
     },
 }
 
+/// A numeric field the active tool will accept via the dynamic-input HUD.
+/// The tool drives what fields are live (e.g., Rectangle exposes Width+Height
+/// only after its first corner is placed); the viewport binds keystrokes to
+/// a matching buffer list.
+#[derive(Debug, Clone, Copy)]
+pub struct DynamicField {
+    pub label: &'static str,
+    pub unit: &'static str,
+}
+
+pub const DYN_FIELD_LENGTH: DynamicField = DynamicField {
+    label: "Length",
+    unit: "mm",
+};
+pub const DYN_FIELD_WIDTH: DynamicField = DynamicField {
+    label: "Width",
+    unit: "mm",
+};
+pub const DYN_FIELD_HEIGHT: DynamicField = DynamicField {
+    label: "Height",
+    unit: "mm",
+};
+pub const DYN_FIELD_RADIUS: DynamicField = DynamicField {
+    label: "Radius",
+    unit: "mm",
+};
+pub const DYN_FIELD_ANGLE_DEG: DynamicField = DynamicField {
+    label: "Angle",
+    unit: "deg",
+};
+
 pub trait Tool: Send {
     fn kind(&self) -> ActiveToolKind;
 
@@ -159,5 +190,41 @@ pub trait Tool: Send {
 
     fn step_hint(&self) -> Option<String> {
         None
+    }
+
+    /// Fields this tool will accept from the dynamic-input HUD right now.
+    /// Empty means "no typed input expected"; the viewport hides the HUD.
+    fn dynamic_fields(&self) -> &'static [DynamicField] {
+        &[]
+    }
+
+    /// Preview with any currently typed numeric overrides applied. Tools that
+    /// opt into dynamic input should derive their live geometry from `values`
+    /// so the viewport preview updates while the user types.
+    fn dynamic_preview(&self, _values: &[Option<f64>]) -> Option<ToolPreview> {
+        None
+    }
+
+    /// Effective field values for the dynamic HUD. Each index corresponds to
+    /// `dynamic_fields()[i]` and should include cursor-derived values for
+    /// unconstrained fields plus typed overrides for constrained ones.
+    fn dynamic_display_values(&self, _values: &[Option<f64>]) -> Vec<Option<f64>> {
+        Vec::new()
+    }
+
+    /// Geometric validation for a typed value in the given slot.
+    fn dynamic_value_is_valid(&self, _field_index: usize, _value: f64) -> bool {
+        true
+    }
+
+    /// Called when the user presses Enter with typed values. `values[i]`
+    /// corresponds to `dynamic_fields()[i]`; `None` means "use the cursor".
+    fn on_dynamic_commit(
+        &mut self,
+        _ctx: &ToolContext<'_>,
+        _world_mm: DVec2,
+        _values: &[Option<f64>],
+    ) -> Vec<AppCommand> {
+        Vec::new()
     }
 }

@@ -49,6 +49,46 @@ pub enum AppCommand {
         start: DVec2,
         end: DVec2,
     },
+    SetLineLength {
+        sketch: SketchId,
+        entity: SketchEntityId,
+        length: LengthMm,
+    },
+    SetRectangleWidth {
+        sketch: SketchId,
+        entity: SketchEntityId,
+        width: LengthMm,
+    },
+    SetRectangleHeight {
+        sketch: SketchId,
+        entity: SketchEntityId,
+        height: LengthMm,
+    },
+    SetCircleRadius {
+        sketch: SketchId,
+        entity: SketchEntityId,
+        radius: LengthMm,
+    },
+    SetArcRadius {
+        sketch: SketchId,
+        entity: SketchEntityId,
+        radius: LengthMm,
+    },
+    SetArcSweepDegrees {
+        sketch: SketchId,
+        entity: SketchEntityId,
+        sweep_degrees: f64,
+    },
+    SetPointX {
+        sketch: SketchId,
+        entity: SketchEntityId,
+        x: f64,
+    },
+    SetPointY {
+        sketch: SketchId,
+        entity: SketchEntityId,
+        y: f64,
+    },
     DeleteEntity {
         sketch: SketchId,
         entity: SketchEntityId,
