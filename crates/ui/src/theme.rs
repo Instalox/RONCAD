@@ -10,6 +10,9 @@ impl ThemeColors {
     pub const BG_DEEP: Color32 = Color32::from_rgb(0x14, 0x16, 0x1A);
     pub const BG_PANEL: Color32 = Color32::from_rgb(0x1B, 0x1E, 0x24);
     pub const BG_PANEL_ALT: Color32 = Color32::from_rgb(0x21, 0x25, 0x2C);
+    pub const BG_PANEL_GLASS: Color32 = Color32::from_rgba_premultiplied(0x1B, 0x1E, 0x24, 0xD4);
+    pub const BG_PANEL_ALT_GLASS: Color32 =
+        Color32::from_rgba_premultiplied(0x21, 0x25, 0x2C, 0xB8);
     pub const BG_HEADER: Color32 = Color32::from_rgb(0x20, 0x24, 0x2B);
     pub const BG_HEADER_ACTIVE: Color32 = Color32::from_rgb(0x26, 0x2B, 0x34);
     pub const BG_HOVER: Color32 = Color32::from_rgb(0x2A, 0x2F, 0x38);

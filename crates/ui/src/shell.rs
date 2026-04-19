@@ -8,6 +8,7 @@ use roncad_geometry::Project;
 use roncad_rendering::Camera2d;
 use roncad_tools::{SnapEngine, SnapResult, ToolManager};
 
+use crate::HudEditState;
 use crate::{
     right_sidebar, status_bar, tool_shelf, toolbar,
     viewport::{self, ViewportInteractionHandler},
@@ -21,6 +22,7 @@ pub struct ShellContext<'a> {
     pub camera: &'a mut Camera2d,
     pub project: &'a Project,
     pub cursor_world_mm: &'a mut Option<glam::DVec2>,
+    pub hud_state: &'a mut HudEditState,
 }
 
 #[derive(Default)]

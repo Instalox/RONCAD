@@ -6,6 +6,7 @@ mod dimension_overlay;
 mod dynamic_overlay;
 mod grid_overlay;
 mod hud_overlay;
+mod mini_hud;
 mod profile_overlay;
 mod sketch_overlay;
 mod snap_overlay;
@@ -74,6 +75,7 @@ pub fn render(
             snap_overlay::paint(ui.painter(), rect, shell.camera, shell.snap_result.as_ref());
             tool_overlay::paint_preview(ui.painter(), rect, shell.camera, shell.tool_manager);
             hud_overlay::paint(ui, rect, shell, interaction.hovered_target.as_ref());
+            mini_hud::paint(ui, rect, shell, response);
             dynamic_overlay::paint(ui, rect, shell);
         });
 }

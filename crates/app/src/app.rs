@@ -8,7 +8,7 @@ use roncad_core::selection::Selection;
 use roncad_geometry::Project;
 use roncad_rendering::Camera2d;
 use roncad_tools::{SnapEngine, SnapResult, ToolManager};
-use roncad_ui::{apply_dark_theme, render_shell, ShellContext};
+use roncad_ui::{apply_dark_theme, render_shell, HudEditState, ShellContext};
 
 use crate::dispatcher;
 use crate::interaction_controller;
@@ -40,10 +40,16 @@ struct RenderCache {
     camera: Camera2d,
 }
 
+#[derive(Default)]
+struct UiState {
+    hud_state: HudEditState,
+}
+
 pub struct RonCadApp {
     document: DocumentState,
     tool: ToolRuntimeState,
     render: RenderCache,
+    ui: UiState,
 }
 
 impl RonCadApp {
@@ -53,6 +59,7 @@ impl RonCadApp {
             document: DocumentState::default(),
             tool: ToolRuntimeState::default(),
             render: RenderCache::default(),
+            ui: UiState::default(),
         }
     }
 
@@ -78,6 +85,7 @@ impl App for RonCadApp {
             camera: &mut self.render.camera,
             project: &self.document.project,
             cursor_world_mm: &mut self.tool.cursor_world_mm,
+            hud_state: &mut self.ui.hud_state,
         };
 
         let response = render_shell(
