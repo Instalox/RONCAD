@@ -18,6 +18,8 @@ pub(super) fn paint(painter: &egui::Painter, rect: Rect, camera: &Camera2d) {
 
     let center = screen_center(rect);
     let ppm = camera.pixels_per_mm;
+    let focus = camera.plane_focus_mm();
+    let span = camera.plane_half_extents_mm();
 
     let minor_step_mm = pick_step(ppm, DOT_GRID_TARGET_SPACING_PX);
     let major_step_mm = minor_step_mm * 5.0;
@@ -27,6 +29,8 @@ pub(super) fn paint(painter: &egui::Painter, rect: Rect, camera: &Camera2d) {
         rect,
         center,
         camera,
+        focus,
+        span,
         minor_step_mm,
         ThemeColors::GRID_DOT,
         MINOR_DOT_RADIUS,
@@ -38,6 +42,8 @@ pub(super) fn paint(painter: &egui::Painter, rect: Rect, camera: &Camera2d) {
         rect,
         center,
         camera,
+        focus,
+        span,
         major_step_mm,
         ThemeColors::GRID_MAJOR,
         MAJOR_DOT_RADIUS,
@@ -45,7 +51,7 @@ pub(super) fn paint(painter: &egui::Painter, rect: Rect, camera: &Camera2d) {
         MAJOR_DOT_FULL_SPACING_PX,
     );
 
-    paint_axes(painter, rect, center, camera);
+    paint_axes(painter, rect, center, camera, focus, span);
 }
 
 fn paint_dots(
@@ -53,6 +59,8 @@ fn paint_dots(
     rect: Rect,
     center: DVec2,
     camera: &Camera2d,
+    focus: DVec2,
+    span: DVec2,
     step_mm: f64,
     color: Color32,
     base_radius: f32,
@@ -64,7 +72,8 @@ fn paint_dots(
         return;
     };
 
-    let (world_min, world_max) = world_bounds(rect, center, camera);
+    let world_min = focus - span;
+    let world_max = focus + span;
     let x_start = (world_min.x / step_mm).floor() * step_mm;
     let x_end = (world_max.x / step_mm).ceil() * step_mm;
     let y_start = (world_min.y / step_mm).floor() * step_mm;
@@ -77,10 +86,11 @@ fn paint_dots(
     while x <= x_end {
         let mut y = y_start;
         while y <= y_end {
-            let p = camera.world_to_screen(DVec2::new(x, y), center);
-            let pos = Pos2::new(p.x as f32, p.y as f32);
-            if rect.contains(pos) {
-                painter.circle_filled(pos, radius, color);
+            if let Some(p) = camera.project_point(glam::DVec3::new(x, y, 0.0), center) {
+                let pos = Pos2::new(p.x as f32, p.y as f32);
+                if rect.contains(pos) {
+                    painter.circle_filled(pos, radius, color);
+                }
             }
             y += step_mm;
         }
@@ -88,34 +98,59 @@ fn paint_dots(
     }
 }
 
-fn paint_axes(painter: &egui::Painter, rect: Rect, center: DVec2, camera: &Camera2d) {
-    let origin = camera.world_to_screen(DVec2::ZERO, center);
-    if (rect.min.x as f64..=rect.max.x as f64).contains(&origin.x) {
-        painter.line_segment(
-            [
-                Pos2::new(origin.x as f32, rect.min.y),
-                Pos2::new(origin.x as f32, rect.max.y),
-            ],
-            Stroke::new(1.2, ThemeColors::GRID_AXIS_Y),
+fn paint_axes(
+    painter: &egui::Painter,
+    rect: Rect,
+    center: DVec2,
+    camera: &Camera2d,
+    focus: DVec2,
+    span: DVec2,
+) {
+    if (-span.y..=span.y).contains(&focus.y) {
+        paint_axis_segment(
+            painter,
+            rect,
+            camera,
+            center,
+            DVec2::new(-span.x, 0.0),
+            DVec2::new(span.x, 0.0),
+            ThemeColors::GRID_AXIS_X,
         );
     }
-    if (rect.min.y as f64..=rect.max.y as f64).contains(&origin.y) {
-        painter.line_segment(
-            [
-                Pos2::new(rect.min.x, origin.y as f32),
-                Pos2::new(rect.max.x, origin.y as f32),
-            ],
-            Stroke::new(1.2, ThemeColors::GRID_AXIS_X),
+    if (-span.x..=span.x).contains(&focus.x) {
+        paint_axis_segment(
+            painter,
+            rect,
+            camera,
+            center,
+            DVec2::new(0.0, -span.y),
+            DVec2::new(0.0, span.y),
+            ThemeColors::GRID_AXIS_Y,
         );
     }
 }
 
-fn world_bounds(rect: Rect, center: DVec2, camera: &Camera2d) -> (DVec2, DVec2) {
-    let world_min =
-        camera.screen_to_world(DVec2::new(rect.min.x as f64, rect.max.y as f64), center);
-    let world_max =
-        camera.screen_to_world(DVec2::new(rect.max.x as f64, rect.min.y as f64), center);
-    (world_min, world_max)
+fn paint_axis_segment(
+    painter: &egui::Painter,
+    rect: Rect,
+    camera: &Camera2d,
+    center: DVec2,
+    start: DVec2,
+    end: DVec2,
+    color: Color32,
+) {
+    let (Some(start), Some(end)) = (
+        camera.project_point(glam::DVec3::new(start.x, start.y, 0.0), center),
+        camera.project_point(glam::DVec3::new(end.x, end.y, 0.0), center),
+    ) else {
+        return;
+    };
+
+    let start = Pos2::new(start.x as f32, start.y as f32);
+    let end = Pos2::new(end.x as f32, end.y as f32);
+    if rect.contains(start) || rect.contains(end) {
+        painter.line_segment([start, end], Stroke::new(1.2, color));
+    }
 }
 
 fn dot_strength(step_px: f64, min_spacing_px: f64, full_spacing_px: f64) -> Option<f32> {

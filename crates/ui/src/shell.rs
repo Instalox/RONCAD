@@ -83,17 +83,37 @@ fn split_shell_rect(rect: Rect, status_height: f32) -> (Rect, Rect) {
 }
 
 fn fit_active_view(shell: &mut ShellContext<'_>, rect: Rect) {
-    let Some(sketch) = shell.project.active_sketch() else {
-        return;
-    };
-    let Some((min, max)) = sketch.bounds() else {
+    let Some((min, max)) = fit_bounds(shell.project) else {
         return;
     };
 
-    shell.camera.fit_bounds(
+    shell.camera.fit_bounds_3d(
         glam::DVec2::new(rect.width() as f64, rect.height() as f64),
         min,
         max,
         36.0,
     );
+}
+
+fn fit_bounds(project: &Project) -> Option<(glam::DVec3, glam::DVec3)> {
+    let mut min = glam::DVec3::splat(f64::INFINITY);
+    let mut max = glam::DVec3::splat(f64::NEG_INFINITY);
+    let mut found = false;
+
+    if let Some(sketch) = project.active_sketch() {
+        if let Some((sketch_min, sketch_max)) = sketch.bounds() {
+            min = min.min(glam::DVec3::new(sketch_min.x, sketch_min.y, 0.0));
+            max = max.max(glam::DVec3::new(sketch_max.x, sketch_max.y, 0.0));
+            found = true;
+        }
+    }
+
+    for (_, feature) in project.features.iter() {
+        let (feature_min, feature_max) = feature.bounds_3d();
+        min = min.min(feature_min);
+        max = max.max(feature_max);
+        found = true;
+    }
+
+    found.then_some((min, max))
 }

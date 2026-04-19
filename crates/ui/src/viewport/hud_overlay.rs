@@ -71,7 +71,8 @@ pub(super) fn paint(
                                     }
 
                                     hud_sep(ui);
-                                    hud_segment(ui, "middle", "pan");
+                                    hud_segment(ui, "middle", "orbit");
+                                    hud_segment(ui, "right", "pan");
                                     hud_segment(ui, "scroll", "zoom");
                                 });
                             });

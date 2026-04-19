@@ -142,7 +142,7 @@ fn status_context(shell: &ShellContext<'_>) -> Option<(String, egui::Color32)> {
 fn status_hint(kind: ActiveToolKind, dynamic_active: bool) -> &'static str {
     match kind {
         ActiveToolKind::Select => "Click or box-select",
-        ActiveToolKind::Pan => "Drag to pan",
+        ActiveToolKind::Pan => "Middle orbit, right pan",
         ActiveToolKind::Line if dynamic_active => "Tab or Enter edits",
         ActiveToolKind::Line => "Click first point",
         ActiveToolKind::Rectangle if dynamic_active => "Type width and height",

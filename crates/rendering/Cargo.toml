@@ -11,4 +11,5 @@ path = "src/lib.rs"
 
 [dependencies]
 roncad-core.workspace = true
+roncad-geometry.workspace = true
 glam.workspace = true

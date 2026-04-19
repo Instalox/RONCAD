@@ -2,6 +2,7 @@
 //! active sketch, and the live preview from the active tool. The app crate
 //! owns interaction policy and injects it here as a controller callback.
 
+mod body_overlay;
 mod dimension_overlay;
 mod dynamic_overlay;
 mod extrude_overlay;
@@ -55,9 +56,19 @@ pub fn render_in_rect(
         .fill(ThemeColors::BG_DEEP)
         .show(&mut viewport_ui, |ui| {
             let (rect, resp) = ui.allocate_exact_size(rect.size(), Sense::click_and_drag());
+            shell
+                .camera
+                .update_viewport(DVec2::new(rect.width() as f64, rect.height() as f64));
 
             let interaction = handle_interaction(ui, &resp, rect, shell, response);
             grid_overlay::paint(ui.painter(), rect, shell.camera);
+            body_overlay::paint(
+                ui.painter(),
+                rect,
+                shell.camera,
+                shell.project,
+                shell.selection,
+            );
             sketch_overlay::paint(
                 ui.painter(),
                 rect,

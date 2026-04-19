@@ -102,11 +102,13 @@ pub fn handle_viewport_interaction(
         response.commands.push(AppCommand::DeleteSelection);
     }
 
-    if resp.dragged_by(PointerButton::Middle) || resp.dragged_by(PointerButton::Secondary) {
-        let delta = resp.drag_delta();
-        shell
-            .camera
-            .pan_pixels(DVec2::new(delta.x as f64, delta.y as f64));
+    let pointer_delta = ui.ctx().input(|input| input.pointer.delta());
+    let pointer_delta = DVec2::new(pointer_delta.x as f64, pointer_delta.y as f64);
+
+    if resp.dragged_by(PointerButton::Middle) {
+        shell.camera.orbit_pixels(pointer_delta);
+    } else if resp.dragged_by(PointerButton::Secondary) {
+        shell.camera.pan_pixels(pointer_delta, center);
     }
 
     if resp.hovered() {
