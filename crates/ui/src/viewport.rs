@@ -1,6 +1,6 @@
 //! Central viewport. Milestone 2 paints the grid, the sketch entities of the
-//! active sketch, and the live preview from the active tool. Pointer events
-//! on left-click are routed to the ToolManager; middle/right drag pans.
+//! active sketch, and the live preview from the active tool. The app crate
+//! owns interaction policy and injects it here as a controller callback.
 
 mod dimension_overlay;
 mod dynamic_overlay;
@@ -11,28 +11,43 @@ mod sketch_overlay;
 mod snap_overlay;
 mod tool_overlay;
 
-use egui::{CentralPanel, Color32, Frame, Key, PointerButton, Pos2, Rect, Sense, Ui};
+use egui::{CentralPanel, Color32, Frame, Pos2, Rect, Sense, Ui};
 use glam::DVec2;
-use roncad_core::command::AppCommand;
 use roncad_core::ids::{SketchEntityId, SketchId};
-use roncad_geometry::{pick_closed_profile, pick_entity, SketchProfile};
-use roncad_tools::{
-    ActiveToolKind, Modifiers, SnapEngine, SnapResult, ToolContext, ENTITY_PICK_RADIUS_PX,
-};
+use roncad_geometry::SketchProfile;
 
 use crate::shell::{ShellContext, ShellResponse};
 use crate::theme::ThemeColors;
 
-const COLOR_SKETCH: Color32 = Color32::from_rgb(0xE0, 0xE4, 0xEA);
+#[derive(Default)]
+pub struct ViewportInteractionState {
+    pub hovered_entity: Option<(SketchId, SketchEntityId)>,
+    pub hovered_profile: Option<SketchProfile>,
+}
 
-pub fn render(ui: &mut Ui, shell: &mut ShellContext<'_>, response: &mut ShellResponse) {
+pub(super) const COLOR_SKETCH: Color32 = Color32::from_rgb(0xE0, 0xE4, 0xEA);
+
+pub type ViewportInteractionHandler = for<'a> fn(
+    &Ui,
+    &egui::Response,
+    Rect,
+    &mut ShellContext<'a>,
+    &mut ShellResponse,
+) -> ViewportInteractionState;
+
+pub fn render(
+    ui: &mut Ui,
+    shell: &mut ShellContext<'_>,
+    response: &mut ShellResponse,
+    handle_interaction: ViewportInteractionHandler,
+) {
     CentralPanel::default()
         .frame(Frame::new().fill(ThemeColors::BG_DEEP))
         .show_inside(ui, |ui| {
             let available = ui.available_size_before_wrap();
             let (rect, resp) = ui.allocate_exact_size(available, Sense::click_and_drag());
 
-            let (hovered_entity, hovered_profile) = handle_input(ui, &resp, shell, rect, response);
+            let interaction = handle_interaction(ui, &resp, rect, shell, response);
             grid_overlay::paint(ui.painter(), rect, shell.camera);
             sketch_overlay::paint(
                 ui.painter(),
@@ -40,7 +55,7 @@ pub fn render(ui: &mut Ui, shell: &mut ShellContext<'_>, response: &mut ShellRes
                 shell.camera,
                 shell.project,
                 shell.selection,
-                hovered_entity,
+                interaction.hovered_entity,
             );
             dimension_overlay::paint(
                 ui.painter(),
@@ -49,104 +64,17 @@ pub fn render(ui: &mut Ui, shell: &mut ShellContext<'_>, response: &mut ShellRes
                 shell.project,
                 shell.selection,
             );
-            profile_overlay::paint(ui.painter(), rect, shell.camera, hovered_profile.as_ref());
+            profile_overlay::paint(
+                ui.painter(),
+                rect,
+                shell.camera,
+                interaction.hovered_profile.as_ref(),
+            );
             snap_overlay::paint(ui.painter(), rect, shell.camera, shell.snap_result.as_ref());
             tool_overlay::paint_preview(ui.painter(), rect, shell.camera, shell.tool_manager);
-            hud_overlay::paint(ui, rect, shell, hovered_entity);
+            hud_overlay::paint(ui, rect, shell, interaction.hovered_entity);
             dynamic_overlay::paint(ui, rect, shell);
         });
-}
-
-fn handle_input(
-    ui: &Ui,
-    resp: &egui::Response,
-    shell: &mut ShellContext<'_>,
-    rect: Rect,
-    response: &mut ShellResponse,
-) -> (Option<(SketchId, SketchEntityId)>, Option<SketchProfile>) {
-    let center = screen_center(rect);
-    if resp.clicked() {
-        resp.request_focus();
-    }
-    handle_tool_shortcuts(ui, shell.tool_manager);
-    let active_kind = shell.tool_manager.active_kind();
-
-    let raw_cursor_world = resp
-        .hover_pos()
-        .map(|p| shell.camera.screen_to_world(pos_to_dvec(p), center));
-
-    let modifiers = ui.ctx().input(|i| Modifiers {
-        shift: i.modifiers.shift,
-        ctrl: i.modifiers.ctrl,
-        alt: i.modifiers.alt,
-    });
-
-    let ctx = ToolContext {
-        active_sketch: shell.project.active_sketch,
-        sketch: shell.project.active_sketch(),
-        pixels_per_mm: shell.camera.pixels_per_mm,
-        modifiers,
-    };
-    let hovered_entity = hovered_selectable_entity(raw_cursor_world, active_kind, &ctx);
-    let hovered_profile = hovered_closed_profile(raw_cursor_world, active_kind, &ctx);
-    let snap_result = raw_cursor_world
-        .and_then(|world| active_snap_result(world, active_kind, shell.snap_engine, &ctx));
-    *shell.snap_result = snap_result;
-    let cursor_world = raw_cursor_world.map(|world| snap_result.map_or(world, |snap| snap.point));
-    *shell.cursor_world_mm = cursor_world;
-
-    if let Some(world) = cursor_world {
-        shell.tool_manager.on_pointer_move(&ctx, world);
-    }
-
-    handle_dynamic_input(ui, shell, cursor_world, &ctx, response);
-
-    if resp.clicked_by(PointerButton::Primary) {
-        if let Some(p) = resp.interact_pointer_pos() {
-            let raw_world = shell.camera.screen_to_world(pos_to_dvec(p), center);
-            let world = active_snap_result(raw_world, active_kind, shell.snap_engine, &ctx)
-                .map_or(raw_world, |snap| snap.point);
-            let cmds = shell.tool_manager.on_pointer_click(&ctx, world);
-            response.commands.extend(cmds);
-        }
-    }
-
-    if resp.clicked_by(PointerButton::Secondary) {
-        if let Some(p) = resp.interact_pointer_pos() {
-            let raw_world = shell.camera.screen_to_world(pos_to_dvec(p), center);
-            let world = active_snap_result(raw_world, active_kind, shell.snap_engine, &ctx)
-                .map_or(raw_world, |snap| snap.point);
-            let cmds = shell.tool_manager.on_pointer_secondary_click(&ctx, world);
-            response.commands.extend(cmds);
-        }
-    }
-
-    if ui.ctx().input(|i| i.key_pressed(Key::Escape)) {
-        let _ = shell.tool_manager.on_escape();
-    }
-
-    if resp.has_focus() && ui.ctx().input(|i| i.key_pressed(Key::Delete)) {
-        response.commands.push(AppCommand::DeleteSelection);
-    }
-
-    if resp.dragged_by(PointerButton::Middle) || resp.dragged_by(PointerButton::Secondary) {
-        let delta = resp.drag_delta();
-        shell
-            .camera
-            .pan_pixels(DVec2::new(delta.x as f64, delta.y as f64));
-    }
-
-    if resp.hovered() {
-        let scroll = ui.ctx().input(|i| i.smooth_scroll_delta.y);
-        if scroll.abs() > f32::EPSILON {
-            if let Some(ptr) = resp.hover_pos() {
-                let factor = (scroll as f64 * 0.0025).exp();
-                shell.camera.zoom_about(pos_to_dvec(ptr), center, factor);
-            }
-        }
-    }
-
-    (hovered_entity, hovered_profile)
 }
 
 fn pick_step(pixels_per_mm: f64, min_px: f64) -> f64 {
@@ -161,194 +89,13 @@ fn pick_step(pixels_per_mm: f64, min_px: f64) -> f64 {
     base
 }
 
-fn active_snap_result(
-    raw_world: DVec2,
-    active_kind: ActiveToolKind,
-    snap_engine: &SnapEngine,
-    ctx: &ToolContext<'_>,
-) -> Option<SnapResult> {
-    if tool_uses_snap(active_kind) {
-        let result = snap_engine.snap(raw_world, ctx.sketch, ctx.pixels_per_mm);
-        result.kind.map(|_| result)
-    } else {
-        None
-    }
-}
-
-fn hovered_selectable_entity(
-    raw_world: Option<DVec2>,
-    active_kind: ActiveToolKind,
-    ctx: &ToolContext<'_>,
-) -> Option<(SketchId, SketchEntityId)> {
-    if active_kind != ActiveToolKind::Select {
-        return None;
-    }
-
-    let sketch_id = ctx.active_sketch?;
-    let sketch = ctx.sketch?;
-    let world = raw_world?;
-    let tolerance_mm = ENTITY_PICK_RADIUS_PX / ctx.pixels_per_mm.max(f64::EPSILON);
-    pick_entity(sketch, world, tolerance_mm).map(|entity| (sketch_id, entity))
-}
-
-fn hovered_closed_profile(
-    raw_world: Option<DVec2>,
-    active_kind: ActiveToolKind,
-    ctx: &ToolContext<'_>,
-) -> Option<SketchProfile> {
-    if active_kind != ActiveToolKind::Extrude {
-        return None;
-    }
-
-    let sketch = ctx.sketch?;
-    let world = raw_world?;
-    pick_closed_profile(sketch, world)
-}
-
-fn tool_uses_snap(kind: ActiveToolKind) -> bool {
-    matches!(
-        kind,
-        ActiveToolKind::Line
-            | ActiveToolKind::Rectangle
-            | ActiveToolKind::Circle
-            | ActiveToolKind::Arc
-            | ActiveToolKind::Dimension
-    )
-}
-
-fn handle_dynamic_input(
-    ui: &Ui,
-    shell: &mut ShellContext<'_>,
-    cursor_world: Option<DVec2>,
-    ctx: &ToolContext<'_>,
-    response: &mut ShellResponse,
-) {
-    let fields = shell.tool_manager.dynamic_fields();
-    if fields.is_empty() {
-        shell.tool_manager.dynamic_input_mut().clear();
-        return;
-    }
-    shell.tool_manager.dynamic_input_mut().sync(fields.len());
-
-    // If a TextEdit (e.g., the selection mini HUD) owns the keyboard, defer.
-    // Note: egui_wants_keyboard_input is true for ANY focused widget, including
-    // our viewport response itself — we need text_edit_focused specifically.
-    if ui.ctx().text_edit_focused() {
-        return;
-    }
-
-    let shift = egui::Modifiers::SHIFT;
-    let typed_chars: Vec<char> = ui.ctx().input(|i| {
-        i.events
-            .iter()
-            .filter_map(|event| match event {
-                egui::Event::Text(text) => Some(text.as_str()),
-                _ => None,
-            })
-            .flat_map(|text| text.chars())
-            .collect()
-    });
-    let none = egui::Modifiers::NONE;
-    let (backspace, cycle_back, cycle_next, submit) = ui.ctx().input_mut(|i| {
-        (
-            i.consume_key(none, Key::Backspace),
-            i.consume_key(shift, Key::Tab),
-            i.consume_key(none, Key::Tab),
-            i.consume_key(none, Key::Enter),
-        )
-    });
-
-    {
-        let state = shell.tool_manager.dynamic_input_mut();
-        if let Some(buf) = state.active_buffer_mut() {
-            for ch in typed_chars {
-                append_typed_char(buf, ch);
-            }
-            if backspace {
-                buf.pop();
-            }
-        }
-    }
-
-    if cycle_back {
-        shell.tool_manager.dynamic_input_mut().cycle_back();
-    } else if cycle_next {
-        shell.tool_manager.dynamic_input_mut().cycle();
-    }
-    if submit {
-        if let Some(world) = cursor_world {
-            let cmds = shell.tool_manager.commit_dynamic(ctx, world);
-            response.commands.extend(cmds);
-        }
-    }
-}
-
-fn append_typed_char(buf: &mut String, ch: char) {
-    match ch {
-        '0'..='9' => buf.push(ch),
-        '.' => {
-            if !buf.contains('.') {
-                buf.push('.');
-            }
-        }
-        '-' => {
-            if buf.is_empty() {
-                buf.push('-');
-            }
-        }
-        _ => {}
-    }
-}
-
-fn handle_tool_shortcuts(ui: &Ui, manager: &mut roncad_tools::ToolManager) {
-    if ui.ctx().egui_wants_keyboard_input() {
-        return;
-    }
-    if !manager.dynamic_fields().is_empty() {
-        return;
-    }
-
-    let next = ui.ctx().input(|i| {
-        if i.modifiers.ctrl || i.modifiers.alt || i.modifiers.command {
-            return None;
-        }
-        if i.key_pressed(Key::V) {
-            Some(ActiveToolKind::Select)
-        } else if i.key_pressed(Key::A) {
-            Some(ActiveToolKind::Arc)
-        } else if i.key_pressed(Key::L) {
-            Some(ActiveToolKind::Line)
-        } else if i.key_pressed(Key::R) {
-            Some(ActiveToolKind::Rectangle)
-        } else if i.key_pressed(Key::C) {
-            Some(ActiveToolKind::Circle)
-        } else if i.key_pressed(Key::F) {
-            Some(ActiveToolKind::Fillet)
-        } else if i.key_pressed(Key::D) {
-            Some(ActiveToolKind::Dimension)
-        } else if i.key_pressed(Key::E) {
-            Some(ActiveToolKind::Extrude)
-        } else {
-            None
-        }
-    });
-
-    if let Some(kind) = next {
-        manager.set_active(kind);
-    }
-}
-
-fn screen_center(rect: Rect) -> DVec2 {
+pub(super) fn screen_center(rect: Rect) -> DVec2 {
     DVec2::new(
         (rect.min.x as f64 + rect.max.x as f64) * 0.5,
         (rect.min.y as f64 + rect.max.y as f64) * 0.5,
     )
 }
 
-fn pos_to_dvec(p: Pos2) -> DVec2 {
-    DVec2::new(p.x as f64, p.y as f64)
-}
-
-fn to_pos(v: DVec2) -> Pos2 {
+pub(super) fn to_pos(v: DVec2) -> Pos2 {
     Pos2::new(v.x as f32, v.y as f32)
 }

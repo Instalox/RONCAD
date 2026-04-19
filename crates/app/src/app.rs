@@ -11,6 +11,7 @@ use roncad_tools::{SnapEngine, SnapResult, ToolManager};
 use roncad_ui::{apply_dark_theme, render_shell, ShellContext};
 
 use crate::dispatcher;
+use crate::interaction_controller;
 
 struct DocumentState {
     project: Project,
@@ -79,7 +80,11 @@ impl App for RonCadApp {
             cursor_world_mm: &mut self.tool.cursor_world_mm,
         };
 
-        let response = render_shell(ui, &mut shell);
+        let response = render_shell(
+            ui,
+            &mut shell,
+            interaction_controller::handle_viewport_interaction,
+        );
 
         self.dispatch(response.commands);
         if response.quit_requested {

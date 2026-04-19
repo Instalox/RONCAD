@@ -7,104 +7,12 @@ use roncad_core::command::AppCommand;
 use crate::arc_tool::ArcTool;
 use crate::circle_tool::CircleTool;
 use crate::dimension_tool::DimensionTool;
+use crate::dynamic_input::{DynamicFieldView, DynamicInputState};
 use crate::fillet_tool::FilletTool;
 use crate::line_tool::LineTool;
 use crate::rectangle_tool::RectangleTool;
 use crate::select_tool::SelectTool;
 use crate::tool::{ActiveToolKind, DynamicField, Tool, ToolContext, ToolPreview};
-
-/// Text buffers for the Fusion-style dynamic input HUD. The viewport
-/// appends keystrokes to the active buffer; Tab cycles; Enter commits.
-#[derive(Debug, Default, Clone)]
-pub struct DynamicInputState {
-    pub buffers: Vec<String>,
-    pub active: usize,
-}
-
-impl DynamicInputState {
-    pub fn clear(&mut self) {
-        self.buffers.clear();
-        self.active = 0;
-    }
-
-    pub fn sync(&mut self, field_count: usize) {
-        if self.buffers.len() != field_count {
-            self.buffers = vec![String::new(); field_count];
-            self.active = 0;
-        }
-    }
-
-    pub fn cycle(&mut self) {
-        if !self.buffers.is_empty() {
-            self.active = (self.active + 1) % self.buffers.len();
-        }
-    }
-
-    pub fn cycle_back(&mut self) {
-        if !self.buffers.is_empty() {
-            self.active = (self.active + self.buffers.len() - 1) % self.buffers.len();
-        }
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.buffers.iter().all(String::is_empty)
-    }
-
-    pub fn has_any_text(&self) -> bool {
-        self.buffers.iter().any(|buffer| !buffer.trim().is_empty())
-    }
-
-    pub fn active_buffer_mut(&mut self) -> Option<&mut String> {
-        self.buffers.get_mut(self.active)
-    }
-
-    pub fn clear_active_buffer(&mut self) -> bool {
-        let Some(buffer) = self.buffers.get_mut(self.active) else {
-            return false;
-        };
-        if buffer.is_empty() {
-            return false;
-        }
-        buffer.clear();
-        true
-    }
-
-    pub fn parsed(&self) -> Vec<Option<f64>> {
-        self.buffers
-            .iter()
-            .map(|b| match parse_buffer(b) {
-                DynamicParseState::Parsed(value) => Some(value),
-                _ => None,
-            })
-            .collect()
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum DynamicFieldVisualState {
-    Preview,
-    Valid,
-    Incomplete,
-    InvalidParse,
-    InvalidGeometry,
-}
-
-#[derive(Debug, Clone)]
-pub struct DynamicFieldView {
-    pub label: &'static str,
-    pub unit: &'static str,
-    pub text: String,
-    pub active: bool,
-    pub state: DynamicFieldVisualState,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-enum DynamicParseState {
-    Empty,
-    Incomplete,
-    InvalidParse,
-    Parsed(f64),
-}
 
 pub struct ToolManager {
     active_kind: ActiveToolKind,
@@ -147,16 +55,9 @@ impl ToolManager {
 
     pub fn on_pointer_click(&mut self, ctx: &ToolContext, world_mm: DVec2) -> Vec<AppCommand> {
         if !self.dynamic_fields().is_empty() && self.dynamic.has_any_text() {
-            if !self.dynamic_input_is_valid() {
-                return Vec::new();
-            }
-
-            let values = self.dynamic.parsed();
-            let commands = self.tool.on_dynamic_commit(ctx, world_mm, &values);
-            if !commands.is_empty() {
-                self.dynamic.clear();
-            }
-            return commands;
+            return self
+                .dynamic
+                .commit_if_valid(self.tool.as_mut(), ctx, world_mm);
         }
 
         let commands = self.tool.on_pointer_click(ctx, world_mm);
@@ -184,10 +85,7 @@ impl ToolManager {
     }
 
     pub fn preview(&self) -> ToolPreview {
-        let values = self.dynamic.parsed();
-        self.tool
-            .dynamic_preview(&values)
-            .unwrap_or_else(|| self.tool.preview())
+        self.dynamic.preview_for(self.tool.as_ref())
     }
 
     pub fn step_hint(&self) -> String {
@@ -209,83 +107,12 @@ impl ToolManager {
     }
 
     pub fn commit_dynamic(&mut self, ctx: &ToolContext, world_mm: DVec2) -> Vec<AppCommand> {
-        if !self.dynamic_input_is_valid() {
-            return Vec::new();
-        }
-        let values = self.dynamic.parsed();
-        let commands = self.tool.on_dynamic_commit(ctx, world_mm, &values);
-        if !commands.is_empty() {
-            self.dynamic.clear();
-        }
-        commands
+        self.dynamic
+            .commit_if_valid(self.tool.as_mut(), ctx, world_mm)
     }
 
     pub fn dynamic_views(&self) -> Vec<DynamicFieldView> {
-        let fields = self.dynamic_fields();
-        if fields.is_empty() {
-            return Vec::new();
-        }
-
-        let parsed_values = self.dynamic.parsed();
-        let preview_values = self.tool.dynamic_display_values(&parsed_values);
-        fields
-            .iter()
-            .enumerate()
-            .map(|(index, field)| {
-                let parse_state = self
-                    .dynamic
-                    .buffers
-                    .get(index)
-                    .map_or(DynamicParseState::Empty, |buffer| parse_buffer(buffer));
-                let active = index == self.dynamic.active;
-                let (text, state) = match parse_state {
-                    DynamicParseState::Empty => (
-                        preview_values
-                            .get(index)
-                            .and_then(|value| *value)
-                            .map(|value| format_dynamic_value(field, value))
-                            .unwrap_or_else(|| "—".to_string()),
-                        DynamicFieldVisualState::Preview,
-                    ),
-                    DynamicParseState::Incomplete => (
-                        self.dynamic.buffers[index].clone(),
-                        DynamicFieldVisualState::Incomplete,
-                    ),
-                    DynamicParseState::InvalidParse => (
-                        self.dynamic.buffers[index].clone(),
-                        DynamicFieldVisualState::InvalidParse,
-                    ),
-                    DynamicParseState::Parsed(value) => {
-                        let state = if self.tool.dynamic_value_is_valid(index, value) {
-                            DynamicFieldVisualState::Valid
-                        } else {
-                            DynamicFieldVisualState::InvalidGeometry
-                        };
-                        (self.dynamic.buffers[index].clone(), state)
-                    }
-                };
-
-                DynamicFieldView {
-                    label: field.label,
-                    unit: field.unit,
-                    text,
-                    active,
-                    state,
-                }
-            })
-            .collect()
-    }
-
-    fn dynamic_input_is_valid(&self) -> bool {
-        self.dynamic
-            .buffers
-            .iter()
-            .enumerate()
-            .all(|(index, buffer)| match parse_buffer(buffer) {
-                DynamicParseState::Empty => true,
-                DynamicParseState::Parsed(value) => self.tool.dynamic_value_is_valid(index, value),
-                DynamicParseState::Incomplete | DynamicParseState::InvalidParse => false,
-            })
+        self.dynamic.views_for(self.tool.as_ref())
     }
 }
 
@@ -311,34 +138,13 @@ impl Tool for PassiveTool {
     }
 }
 
-fn parse_buffer(buffer: &str) -> DynamicParseState {
-    let trimmed = buffer.trim();
-    if trimmed.is_empty() {
-        return DynamicParseState::Empty;
-    }
-    if matches!(trimmed, "-" | "." | "-.") {
-        return DynamicParseState::Incomplete;
-    }
-    match trimmed.parse::<f64>() {
-        Ok(value) if value.is_finite() => DynamicParseState::Parsed(value),
-        _ => DynamicParseState::InvalidParse,
-    }
-}
-
-fn format_dynamic_value(field: &DynamicField, value: f64) -> String {
-    match field.unit {
-        "deg" => format!("{value:.1}"),
-        _ => format!("{value:.3}"),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use glam::dvec2;
     use roncad_core::command::AppCommand;
     use roncad_geometry::Project;
 
-    use super::{DynamicInputState, ToolManager};
+    use super::ToolManager;
     use crate::tool::{ActiveToolKind, ToolContext, ToolPreview};
 
     #[test]
@@ -396,18 +202,5 @@ mod tests {
 
         assert!(!manager.on_escape());
         assert!(matches!(manager.preview(), ToolPreview::None));
-    }
-
-    #[test]
-    fn dynamic_input_state_cycles_backwards() {
-        let mut state = DynamicInputState {
-            buffers: vec![String::new(), String::new(), String::new()],
-            active: 0,
-        };
-
-        state.cycle_back();
-        assert_eq!(state.active, 2);
-        state.cycle_back();
-        assert_eq!(state.active, 1);
     }
 }

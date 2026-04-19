@@ -15,3 +15,4 @@ pub mod viewport;
 
 pub use shell::{render_shell, ShellContext, ShellResponse};
 pub use theme::apply_dark_theme;
+pub use viewport::{ViewportInteractionHandler, ViewportInteractionState};

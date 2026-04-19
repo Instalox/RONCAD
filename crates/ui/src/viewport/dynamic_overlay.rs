@@ -1,7 +1,7 @@
 //! Fusion-style dynamic-input HUD. While a tool is placing geometry and
 //! exposes `dynamic_fields`, this overlay floats at the cursor and echoes
 //! the digits the user is typing into each field. Tab cycles, Enter commits;
-//! the actual keystroke capture lives in the viewport input handler.
+//! the actual keystroke capture lives in the app-side interaction controller.
 
 use egui::{Area, Color32, Frame, Id, Margin, Order, Pos2, Rect, Stroke, Ui};
 use roncad_tools::DynamicFieldVisualState;
