@@ -3,6 +3,7 @@
 use egui::{Align, Color32, Layout, RichText, Sense, Ui, UiBuilder, Vec2};
 use egui_phosphor::regular as ph;
 use roncad_core::command::AppCommand;
+use roncad_core::selection::SelectionItem;
 
 use crate::shell::{ShellContext, ShellResponse};
 use crate::theme::ThemeColors;
@@ -71,19 +72,58 @@ pub fn render_browser_section(ui: &mut Ui, shell: &ShellContext<'_>, response: &
 
     ui.add_space(2.0);
     tree_group(ui, "Bodies");
-    ui.push_id("empty_bodies", |ui| {
-        let _ = tree_row(
-            ui,
-            TreeRow {
-                depth: 1,
-                glyph: ph::CUBE,
-                label: "(none yet)".to_string(),
-                count: None,
-                selected: false,
-                muted: true,
-            },
-        );
-    });
+    if shell.project.bodies.is_empty() {
+        ui.push_id("empty_bodies", |ui| {
+            let _ = tree_row(
+                ui,
+                TreeRow {
+                    depth: 1,
+                    glyph: ph::CUBE,
+                    label: "(none yet)".to_string(),
+                    count: None,
+                    selected: false,
+                    muted: true,
+                },
+            );
+        });
+    } else {
+        for (body_id, body) in shell.project.bodies.iter() {
+            ui.push_id(("body_row", body_id), |ui| {
+                let selected = shell.selection.contains(&SelectionItem::Body(body_id));
+                let row = tree_row(
+                    ui,
+                    TreeRow {
+                        depth: 1,
+                        glyph: ph::CUBE,
+                        label: body.name.clone(),
+                        count: Some(feature_summary(body.feature_count())),
+                        selected,
+                        muted: false,
+                    },
+                );
+                if row.clicked() && !selected {
+                    response.commands.push(AppCommand::SelectBody(body_id));
+                }
+            });
+
+            for (feature_id, feature) in shell.project.body_features(body_id) {
+                ui.push_id(("feature_row", feature_id), |ui| {
+                    let count = format!("{:.3} mm", feature.distance_mm().abs());
+                    let _ = tree_row(
+                        ui,
+                        TreeRow {
+                            depth: 2,
+                            glyph: ph::ARROW_FAT_LINE_UP,
+                            label: feature.name().to_string(),
+                            count: Some(count),
+                            selected: false,
+                            muted: false,
+                        },
+                    );
+                });
+            }
+        }
+    }
 }
 
 struct TreeRow {
@@ -181,4 +221,8 @@ fn tree_row(ui: &mut Ui, row: TreeRow) -> egui::Response {
 
 fn entity_summary(count: usize) -> String {
     format!("{count} ent")
+}
+
+fn feature_summary(count: usize) -> String {
+    format!("{count} feat")
 }

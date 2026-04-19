@@ -5,8 +5,14 @@
 use glam::DVec2;
 use serde::{Deserialize, Serialize};
 
-use crate::ids::{SketchEntityId, SketchId};
+use crate::ids::{BodyId, SketchEntityId, SketchId};
 use crate::units::LengthMm;
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum ProfileRegion {
+    Polygon { points: Vec<DVec2> },
+    Circle { center: DVec2, radius: LengthMm },
+}
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum AppCommand {
@@ -97,6 +103,7 @@ pub enum AppCommand {
         sketch: SketchId,
         entity: SketchEntityId,
     },
+    SelectBody(BodyId),
     ToggleSelection {
         sketch: SketchId,
         entity: SketchEntityId,
@@ -105,6 +112,7 @@ pub enum AppCommand {
     DeleteSelection,
     ExtrudeProfile {
         sketch: SketchId,
+        profile: ProfileRegion,
         distance: LengthMm,
     },
     NoOp,

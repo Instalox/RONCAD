@@ -1,9 +1,11 @@
 //! Applies AppCommand instances to the domain Project. This is the single
 //! chokepoint for state mutation; undo/redo will layer on top later.
 
-use roncad_core::command::AppCommand;
+use roncad_core::command::{AppCommand, ProfileRegion};
 use roncad_core::selection::{Selection, SelectionItem};
-use roncad_geometry::{apply_line_fillet, Project, Sketch, SketchDimension, SketchEntity};
+use roncad_geometry::{
+    apply_line_fillet, Project, Sketch, SketchDimension, SketchEntity, SketchProfile,
+};
 
 pub fn apply(project: &mut Project, selection: &mut Selection, command: &AppCommand) {
     match command {
@@ -22,6 +24,7 @@ pub fn apply(project: &mut Project, selection: &mut Selection, command: &AppComm
         }
         AppCommand::DeleteSketch(id) => {
             project.sketches.remove(*id);
+            project.clear_feature_sketch_source(*id);
             selection.retain(|item| match item {
                 SelectionItem::Sketch(sketch) => sketch != id,
                 SelectionItem::SketchEntity { sketch, .. } => sketch != id,
@@ -259,6 +262,14 @@ pub fn apply(project: &mut Project, selection: &mut Selection, command: &AppComm
                 selection.clear();
             }
         }
+        AppCommand::SelectBody(body) => {
+            if project.bodies.contains_key(*body) {
+                selection.clear();
+                selection.insert(SelectionItem::Body(*body));
+            } else {
+                selection.clear();
+            }
+        }
         AppCommand::ToggleSelection { sketch, entity } => {
             let item = SelectionItem::SketchEntity {
                 sketch: *sketch,
@@ -285,6 +296,13 @@ pub fn apply(project: &mut Project, selection: &mut Selection, command: &AppComm
                     _ => None,
                 })
                 .collect();
+            let selected_bodies: Vec<_> = selection
+                .iter()
+                .filter_map(|item| match item {
+                    SelectionItem::Body(body) => Some(*body),
+                    _ => None,
+                })
+                .collect();
 
             for (sketch, entity) in selected_entities {
                 if let Some(s) = project.sketches.get_mut(sketch) {
@@ -292,11 +310,36 @@ pub fn apply(project: &mut Project, selection: &mut Selection, command: &AppComm
                 }
                 selection.remove(&SelectionItem::SketchEntity { sketch, entity });
             }
+            for body in selected_bodies {
+                project.delete_body(body);
+                selection.remove(&SelectionItem::Body(body));
+            }
         }
-        AppCommand::ExtrudeProfile { .. } => {
-            tracing::debug!("ExtrudeProfile not yet implemented");
+        AppCommand::ExtrudeProfile {
+            sketch,
+            profile,
+            distance,
+        } => {
+            if let Some((body, _feature)) =
+                project.extrude_profile(*sketch, sketch_profile(profile), distance.as_f64())
+            {
+                selection.clear();
+                selection.insert(SelectionItem::Body(body));
+            }
         }
         AppCommand::NoOp => {}
+    }
+}
+
+fn sketch_profile(profile: &ProfileRegion) -> SketchProfile {
+    match profile {
+        ProfileRegion::Polygon { points } => SketchProfile::Polygon {
+            points: points.clone(),
+        },
+        ProfileRegion::Circle { center, radius } => SketchProfile::Circle {
+            center: *center,
+            radius: radius.as_f64(),
+        },
     }
 }
 

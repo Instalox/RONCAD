@@ -2,6 +2,8 @@
 //! No UI, no rendering, no file I/O dependencies.
 
 pub mod arc;
+pub mod body;
+pub mod feature;
 pub mod fillet;
 pub mod hover_target;
 pub mod pick;
@@ -16,6 +18,8 @@ pub use arc::{
     arc_contains_angle, arc_end_angle, arc_end_point, arc_mid_point, arc_point, arc_sample_points,
     arc_start_point, distance_to_arc,
 };
+pub use body::Body;
+pub use feature::{ExtrudeFeature, Feature};
 pub use fillet::{
     apply_line_fillet, fillet_candidate_for_lines, find_line_fillet_candidate,
     LineFilletApplyResult, LineFilletCandidate, LineFilletPreview,

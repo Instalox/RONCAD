@@ -3,7 +3,11 @@ use egui::{
     Area, Button, Frame, Id, Key, Margin, Order, Pos2, Rect, RichText, Stroke, TextEdit, Ui,
 };
 use egui_phosphor::regular as ph;
-use roncad_core::{command::AppCommand, units::LengthMm};
+use roncad_core::{
+    command::{AppCommand, ProfileRegion},
+    units::LengthMm,
+};
+use roncad_geometry::SketchProfile;
 
 use crate::shell::{ShellContext, ShellResponse};
 use crate::theme::ThemeColors;
@@ -177,9 +181,22 @@ fn submit(shell: &mut ShellContext<'_>, response: &mut ShellResponse) {
 
     response.commands.push(AppCommand::ExtrudeProfile {
         sketch: draft.sketch,
+        profile: profile_region(&draft.profile),
         distance: LengthMm::new(distance),
     });
     shell.extrude_hud.clear();
+}
+
+fn profile_region(profile: &SketchProfile) -> ProfileRegion {
+    match profile {
+        SketchProfile::Polygon { points } => ProfileRegion::Polygon {
+            points: points.clone(),
+        },
+        SketchProfile::Circle { center, radius } => ProfileRegion::Circle {
+            center: *center,
+            radius: LengthMm::new(*radius),
+        },
+    }
 }
 
 fn select_all_text(ui: &Ui, widget_id: Id, len: usize) {
