@@ -1,69 +1,105 @@
 //! Bottom status bar: coordinates, zoom level, active-tool hint.
 
-use egui::{Frame, Margin, Panel, RichText, Stroke, Ui};
+use egui::{vec2, Align, Frame, Label, Layout, Margin, Rect, RichText, Stroke, Ui, UiBuilder};
 use roncad_tools::{ActiveToolKind, ToolPreview};
 
 use crate::shell::{ShellContext, ShellResponse};
 use crate::theme::ThemeColors;
 
-pub fn render(ui: &mut Ui, shell: &ShellContext<'_>, _response: &mut ShellResponse) {
-    Panel::bottom("status_bar")
-        .exact_size(24.0)
-        .frame(
-            Frame::new()
-                .fill(ThemeColors::BG_PANEL)
-                .stroke(Stroke::new(1.0, ThemeColors::SEPARATOR))
-                .inner_margin(Margin::symmetric(10, 4)),
-        )
-        .show_inside(ui, |ui| {
+const STATUS_METRICS_WIDTH: f32 = 184.0;
+
+pub fn render_in_rect(
+    ui: &mut Ui,
+    rect: Rect,
+    shell: &ShellContext<'_>,
+    _response: &mut ShellResponse,
+) {
+    let mut status_ui = ui.new_child(
+        UiBuilder::new()
+            .id_salt("status_bar")
+            .max_rect(rect)
+            .layout(Layout::top_down(Align::Min)),
+    );
+    status_ui.expand_to_include_rect(rect);
+    status_ui.set_clip_rect(rect);
+
+    Frame::new()
+        .fill(ThemeColors::BG_PANEL)
+        .stroke(Stroke::new(1.0, ThemeColors::SEPARATOR))
+        .inner_margin(Margin::symmetric(10, 4))
+        .show(&mut status_ui, |ui| {
             let kind = shell.tool_manager.active_kind();
+            ui.set_min_height(rect.height());
+            ui.set_min_width(rect.width());
             ui.spacing_mut().item_spacing = egui::vec2(8.0, 0.0);
 
             ui.push_id("status_bar_row", |ui| {
                 ui.horizontal(|ui| {
-                    status_pair(
-                        ui,
-                        "Mode",
-                        kind.label(),
-                        ThemeColors::tool_accent(kind),
-                        false,
-                    );
-                    status_sep(ui);
-
-                    match shell.cursor_world_mm.as_ref() {
-                        Some(p) => {
-                            status_metric(ui, "X", &format!("{:.3}", p.x), "mm");
-                            status_metric(ui, "Y", &format!("{:.3}", p.y), "mm");
-                        }
-                        None => {
-                            status_pair(ui, "X", "-", ThemeColors::TEXT_DIM, true);
-                            status_pair(ui, "Y", "-", ThemeColors::TEXT_DIM, true);
-                        }
-                    }
-
-                    if let Some(snap) = shell.snap_result.as_ref() {
-                        if let Some(kind) = snap.kind {
+                    ui.push_id("status_bar_primary", |ui| {
+                        ui.horizontal(|ui| {
+                            status_pair(
+                                ui,
+                                "Mode",
+                                kind.label(),
+                                ThemeColors::tool_accent(kind),
+                                false,
+                            );
                             status_sep(ui);
-                            status_pair(ui, "Snap", kind.label(), ThemeColors::ACCENT, false);
-                        }
-                    }
 
+                            match shell.cursor_world_mm.as_ref() {
+                                Some(p) => {
+                                    status_metric(ui, "X", &format!("{:.3}", p.x), "mm");
+                                    status_metric(ui, "Y", &format!("{:.3}", p.y), "mm");
+                                }
+                                None => {
+                                    status_pair(ui, "X", "-", ThemeColors::TEXT_DIM, true);
+                                    status_pair(ui, "Y", "-", ThemeColors::TEXT_DIM, true);
+                                }
+                            }
+
+                            if let Some(snap) = shell.snap_result.as_ref() {
+                                if let Some(kind) = snap.kind {
+                                    status_sep(ui);
+                                    status_pair(
+                                        ui,
+                                        "Snap",
+                                        kind.label(),
+                                        ThemeColors::ACCENT,
+                                        false,
+                                    );
+                                }
+                            }
+                        });
+                    });
+
+                    let info_width =
+                        (ui.available_width() - STATUS_METRICS_WIDTH - ui.spacing().item_spacing.x)
+                            .max(0.0);
                     if let Some((info, color)) = status_context(shell) {
                         status_sep(ui);
-                        ui.label(RichText::new(info).size(11.5).color(color));
+                        ui.add_sized(
+                            vec2(info_width, 16.0),
+                            Label::new(RichText::new(info).size(11.5).color(color)).truncate(),
+                        );
+                    } else if info_width > 0.0 {
+                        ui.add_space(info_width);
                     }
 
                     ui.push_id("status_bar_metrics", |ui| {
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            status_pair(ui, "Units", "mm", ThemeColors::TEXT, false);
-                            status_sep(ui);
-                            status_metric(
-                                ui,
-                                "Zoom",
-                                &format!("{:.2}", shell.camera.pixels_per_mm),
-                                "px/mm",
-                            );
-                        });
+                        ui.allocate_ui_with_layout(
+                            vec2(STATUS_METRICS_WIDTH, ui.available_height()),
+                            Layout::right_to_left(egui::Align::Center),
+                            |ui| {
+                                status_pair(ui, "Units", "mm", ThemeColors::TEXT, false);
+                                status_sep(ui);
+                                status_metric(
+                                    ui,
+                                    "Zoom",
+                                    &format!("{:.2}", shell.camera.pixels_per_mm),
+                                    "px/mm",
+                                );
+                            },
+                        );
                     });
                 });
             });

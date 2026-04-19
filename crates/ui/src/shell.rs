@@ -1,7 +1,7 @@
 //! Top-level panel layout: toolbar (top), tool shelf (left),
 //! inspector + project tree (right), status bar (bottom), viewport (center).
 
-use egui::Ui;
+use egui::{pos2, Rect, Sense, Ui};
 use roncad_core::command::AppCommand;
 use roncad_core::selection::Selection;
 use roncad_geometry::Project;
@@ -41,8 +41,26 @@ pub fn render_shell(
     toolbar::render(ui, shell, &mut response);
     tool_shelf::render(ui, shell, &mut response);
     right_sidebar::render(ui, shell, &mut response);
-    status_bar::render(ui, shell, &mut response);
-    viewport::render(ui, shell, &mut response, viewport_interaction);
+    let remaining = ui.available_rect_before_wrap();
+    if remaining.is_positive() {
+        let _ = ui.allocate_rect(remaining, Sense::hover());
+        let (viewport_rect, status_rect) = split_shell_rect(remaining, 24.0);
+        viewport::render_in_rect(
+            ui,
+            viewport_rect,
+            shell,
+            &mut response,
+            viewport_interaction,
+        );
+        status_bar::render_in_rect(ui, status_rect, shell, &mut response);
+    }
 
     response
+}
+
+fn split_shell_rect(rect: Rect, status_height: f32) -> (Rect, Rect) {
+    let status_top = (rect.max.y - status_height).max(rect.min.y);
+    let viewport_rect = Rect::from_min_max(rect.min, pos2(rect.max.x, status_top));
+    let status_rect = Rect::from_min_max(pos2(rect.min.x, status_top), rect.max);
+    (viewport_rect, status_rect)
 }

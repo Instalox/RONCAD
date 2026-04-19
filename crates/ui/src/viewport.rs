@@ -12,7 +12,7 @@ mod sketch_overlay;
 mod snap_overlay;
 mod tool_overlay;
 
-use egui::{CentralPanel, Color32, Frame, Pos2, Rect, Sense, Ui};
+use egui::{Color32, Frame, Pos2, Rect, Sense, Ui, UiBuilder};
 use glam::DVec2;
 use roncad_geometry::HoverTarget;
 
@@ -34,17 +34,26 @@ pub type ViewportInteractionHandler = for<'a> fn(
     &mut ShellResponse,
 ) -> ViewportInteractionState;
 
-pub fn render(
+pub fn render_in_rect(
     ui: &mut Ui,
+    rect: Rect,
     shell: &mut ShellContext<'_>,
     response: &mut ShellResponse,
     handle_interaction: ViewportInteractionHandler,
 ) {
-    CentralPanel::default()
-        .frame(Frame::new().fill(ThemeColors::BG_DEEP))
-        .show_inside(ui, |ui| {
-            let available = ui.available_size_before_wrap();
-            let (rect, resp) = ui.allocate_exact_size(available, Sense::click_and_drag());
+    let mut viewport_ui = ui.new_child(
+        UiBuilder::new()
+            .id_salt("viewport")
+            .max_rect(rect)
+            .layout(egui::Layout::top_down(egui::Align::Min)),
+    );
+    viewport_ui.expand_to_include_rect(rect);
+    viewport_ui.set_clip_rect(rect);
+
+    Frame::new()
+        .fill(ThemeColors::BG_DEEP)
+        .show(&mut viewport_ui, |ui| {
+            let (rect, resp) = ui.allocate_exact_size(rect.size(), Sense::click_and_drag());
 
             let interaction = handle_interaction(ui, &resp, rect, shell, response);
             grid_overlay::paint(ui.painter(), rect, shell.camera);
