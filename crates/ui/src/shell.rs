@@ -10,8 +10,9 @@ use roncad_tools::{SnapEngine, SnapResult, ToolManager};
 
 use crate::HudEditState;
 use crate::{
-    right_sidebar, status_bar, tool_shelf, toolbar,
+    command_palette, right_sidebar, status_bar, tool_shelf, toolbar,
     viewport::{self, ViewportInteractionHandler},
+    CommandPaletteState,
 };
 
 pub struct ShellContext<'a> {
@@ -23,6 +24,7 @@ pub struct ShellContext<'a> {
     pub project: &'a Project,
     pub cursor_world_mm: &'a mut Option<glam::DVec2>,
     pub hud_state: &'a mut HudEditState,
+    pub command_palette: &'a mut CommandPaletteState,
 }
 
 #[derive(Default)]
@@ -37,6 +39,7 @@ pub fn render_shell(
     viewport_interaction: ViewportInteractionHandler,
 ) -> ShellResponse {
     let mut response = ShellResponse::default();
+    command_palette::handle_shortcut(ui.ctx(), shell.command_palette);
 
     toolbar::render(ui, shell, &mut response);
     tool_shelf::render(ui, shell, &mut response);
@@ -54,6 +57,7 @@ pub fn render_shell(
         );
         status_bar::render_in_rect(ui, status_rect, shell, &mut response);
     }
+    command_palette::render(ui.ctx(), shell, &mut response);
 
     response
 }

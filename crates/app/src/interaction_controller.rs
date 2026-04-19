@@ -23,7 +23,10 @@ pub fn handle_viewport_interaction(
     if resp.clicked() {
         resp.request_focus();
     }
-    handle_tool_shortcuts(ui, shell.tool_manager);
+    let palette_open = shell.command_palette.is_open();
+    if !palette_open {
+        handle_tool_shortcuts(ui, shell.tool_manager);
+    }
     let active_kind = shell.tool_manager.active_kind();
 
     let raw_cursor_world = resp
@@ -53,7 +56,9 @@ pub fn handle_viewport_interaction(
         shell.tool_manager.on_pointer_move(&ctx, world);
     }
 
-    handle_dynamic_input(ui, shell, cursor_world, &ctx, response);
+    if !palette_open {
+        handle_dynamic_input(ui, shell, cursor_world, &ctx, response);
+    }
 
     if resp.clicked_by(PointerButton::Primary) {
         if let Some(pointer) = resp.interact_pointer_pos() {
@@ -75,11 +80,11 @@ pub fn handle_viewport_interaction(
         }
     }
 
-    if ui.ctx().input(|input| input.key_pressed(Key::Escape)) {
+    if !palette_open && ui.ctx().input(|input| input.key_pressed(Key::Escape)) {
         let _ = shell.tool_manager.on_escape();
     }
 
-    if resp.has_focus() && ui.ctx().input(|input| input.key_pressed(Key::Delete)) {
+    if !palette_open && resp.has_focus() && ui.ctx().input(|input| input.key_pressed(Key::Delete)) {
         response.commands.push(AppCommand::DeleteSelection);
     }
 

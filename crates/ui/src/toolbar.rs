@@ -1,7 +1,10 @@
 //! Top command bar. Keeps the chrome compact and concept-aligned: brand,
 //! active sketch selector, compact actions, and mode status.
 
-use egui::{Button, ComboBox, FontId, Frame, Margin, RichText, Sense, Stroke, Ui, Vec2};
+use egui::{
+    os::OperatingSystem, Button, ComboBox, FontId, Frame, Label, Margin, RichText, Sense, Stroke,
+    StrokeKind, Ui, Vec2,
+};
 use egui_phosphor::regular as ph;
 use roncad_core::command::AppCommand;
 
@@ -11,7 +14,7 @@ use crate::theme::ThemeColors;
 const TOOLBAR_HEIGHT: f32 = 40.0;
 const TOOLBAR_ICON_SIZE: f32 = 24.0;
 
-pub fn render(ui: &mut Ui, shell: &ShellContext<'_>, response: &mut ShellResponse) {
+pub fn render(ui: &mut Ui, shell: &mut ShellContext<'_>, response: &mut ShellResponse) {
     egui::Panel::top("toolbar")
         .exact_size(TOOLBAR_HEIGHT)
         .frame(
@@ -53,11 +56,24 @@ pub fn render(ui: &mut Ui, shell: &ShellContext<'_>, response: &mut ShellRespons
                                 tool_accent,
                                 ThemeColors::tool_accent_dim(active_tool),
                             );
-                            ui.label(
-                                RichText::new(&shell.project.name)
-                                    .size(12.0)
-                                    .color(ThemeColors::TEXT_DIM),
+                            ui.add_sized(
+                                Vec2::new(120.0, TOOLBAR_ICON_SIZE),
+                                Label::new(
+                                    RichText::new(&shell.project.name)
+                                        .size(12.0)
+                                        .color(ThemeColors::TEXT_DIM),
+                                )
+                                .truncate(),
                             );
+                            let command_bar = command_bar_hint(
+                                ui,
+                                ui.ctx().os(),
+                                shell.command_palette.is_open(),
+                            )
+                            .on_hover_text("Search tools, sketches, and commands");
+                            if command_bar.clicked() {
+                                shell.command_palette.open();
+                            }
                         });
                     });
                 });
@@ -129,4 +145,77 @@ fn mode_chip(ui: &mut Ui, label: &str, color: egui::Color32, dim: egui::Color32)
                 ui.colored_label(color, RichText::new(label).size(11.5));
             });
         });
+}
+
+fn command_bar_hint(ui: &mut Ui, os: OperatingSystem, open: bool) -> egui::Response {
+    let size = Vec2::new(156.0, 24.0);
+    let (rect, response) = ui.allocate_exact_size(size, Sense::click());
+    let fill = if open {
+        ThemeColors::BG_HEADER_ACTIVE
+    } else if response.hovered() {
+        ThemeColors::BG_HOVER
+    } else {
+        ThemeColors::BG_PANEL_ALT
+    };
+    let stroke = if open {
+        Stroke::new(1.0, ThemeColors::ACCENT_DIM)
+    } else if response.hovered() {
+        Stroke::new(1.0, ThemeColors::BG_ACTIVE)
+    } else {
+        Stroke::new(1.0, ThemeColors::SEPARATOR)
+    };
+    ui.painter().rect_filled(rect, 2.0, fill);
+    ui.painter()
+        .rect_stroke(rect, 2.0, stroke, StrokeKind::Outside);
+
+    let text_color = if open {
+        ThemeColors::TEXT
+    } else if response.hovered() {
+        ThemeColors::TEXT_MID
+    } else {
+        ThemeColors::TEXT_DIM
+    };
+    ui.painter().text(
+        rect.left_center() + egui::vec2(8.0, 0.0),
+        egui::Align2::LEFT_CENTER,
+        ph::MAGNIFYING_GLASS,
+        FontId::proportional(11.5),
+        text_color,
+    );
+    ui.painter().text(
+        rect.left_center() + egui::vec2(24.0, 0.0),
+        egui::Align2::LEFT_CENTER,
+        "Search · run",
+        FontId::proportional(11.0),
+        text_color,
+    );
+
+    let shortcut_rect = egui::Rect::from_min_size(
+        egui::pos2(rect.right() - 48.0, rect.top() + 3.0),
+        egui::vec2(40.0, 18.0),
+    );
+    ui.painter()
+        .rect_filled(shortcut_rect, 2.0, ThemeColors::BG_DEEP);
+    ui.painter().rect_stroke(
+        shortcut_rect,
+        2.0,
+        Stroke::new(1.0, ThemeColors::SEPARATOR_SOFT),
+        StrokeKind::Outside,
+    );
+    ui.painter().text(
+        shortcut_rect.center(),
+        egui::Align2::CENTER_CENTER,
+        palette_shortcut_label(os),
+        FontId::monospace(8.5),
+        ThemeColors::TEXT_MID,
+    );
+
+    response
+}
+
+fn palette_shortcut_label(os: OperatingSystem) -> &'static str {
+    match os {
+        OperatingSystem::Mac => "⌘K",
+        _ => "Ctrl K",
+    }
 }

@@ -1,9 +1,11 @@
 //! Desktop shell: panels, toolbars, inspectors, viewport host.
 //! UI never owns geometry truth; it reads state and emits commands.
 
+mod command_palette;
 mod dimensions;
 mod hud_state;
 
+pub use command_palette::CommandPaletteState;
 pub mod inspector;
 pub mod project_tree;
 pub mod right_sidebar;
