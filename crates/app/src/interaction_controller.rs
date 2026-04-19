@@ -60,7 +60,11 @@ pub fn handle_viewport_interaction(
         handle_dynamic_input(ui, shell, cursor_world, &ctx, response);
     }
 
-    if resp.clicked_by(PointerButton::Primary) {
+    if active_kind == ActiveToolKind::Extrude && resp.clicked_by(PointerButton::Primary) {
+        if let Some(HoverTarget::Profile { sketch, profile }) = hovered_target.as_ref() {
+            shell.extrude_hud.arm(*sketch, profile.clone());
+        }
+    } else if resp.clicked_by(PointerButton::Primary) {
         if let Some(pointer) = resp.interact_pointer_pos() {
             let raw_world = shell.camera.screen_to_world(pos_to_dvec(pointer), center);
             let world = active_snap_result(raw_world, active_kind, shell.snap_engine, &ctx)
@@ -70,7 +74,9 @@ pub fn handle_viewport_interaction(
         }
     }
 
-    if resp.clicked_by(PointerButton::Secondary) {
+    if active_kind == ActiveToolKind::Extrude && resp.clicked_by(PointerButton::Secondary) {
+        shell.extrude_hud.clear();
+    } else if resp.clicked_by(PointerButton::Secondary) {
         if let Some(pointer) = resp.interact_pointer_pos() {
             let raw_world = shell.camera.screen_to_world(pos_to_dvec(pointer), center);
             let world = active_snap_result(raw_world, active_kind, shell.snap_engine, &ctx)
@@ -80,8 +86,16 @@ pub fn handle_viewport_interaction(
         }
     }
 
-    if !palette_open && ui.ctx().input(|input| input.key_pressed(Key::Escape)) {
-        let _ = shell.tool_manager.on_escape();
+    if !palette_open
+        && ui
+            .ctx()
+            .input_mut(|input| input.consume_key(egui::Modifiers::NONE, Key::Escape))
+    {
+        if active_kind == ActiveToolKind::Extrude && shell.extrude_hud.is_open() {
+            shell.extrude_hud.clear();
+        } else {
+            let _ = shell.tool_manager.on_escape();
+        }
     }
 
     if !palette_open && resp.has_focus() && ui.ctx().input(|input| input.key_pressed(Key::Delete)) {

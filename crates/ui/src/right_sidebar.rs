@@ -4,6 +4,7 @@
 use egui::{Frame, Margin, Panel, RichText, ScrollArea, Stroke, Ui};
 use egui_phosphor::regular as ph;
 
+use crate::constraints;
 use crate::inspector;
 use crate::project_tree;
 use crate::shell::{ShellContext, ShellResponse};
@@ -12,6 +13,12 @@ use crate::theme::ThemeColors;
 pub fn render(ui: &mut Ui, shell: &ShellContext<'_>, response: &mut ShellResponse) {
     let browser_badge =
         (!shell.project.sketches.is_empty()).then(|| shell.project.sketches.len().to_string());
+    let constraints_badge = shell
+        .project
+        .active_sketch()
+        .map(|sketch| sketch.dimensions.len())
+        .filter(|count| *count > 0)
+        .map(|count| count.to_string());
 
     Panel::right("right_sidebar")
         .default_size(272.0)
@@ -33,9 +40,15 @@ pub fn render(ui: &mut Ui, shell: &ShellContext<'_>, response: &mut ShellRespons
                     section(ui, "Inspector", ph::SIDEBAR_SIMPLE, None, |ui| {
                         inspector::render_inspector_section(ui, shell, response);
                     });
-                    section(ui, "Constraints", ph::LIST_CHECKS, None, |ui| {
-                        placeholder_row(ui, "No constraints yet.");
-                    });
+                    section(
+                        ui,
+                        "Constraints",
+                        ph::LIST_CHECKS,
+                        constraints_badge.as_deref(),
+                        |ui| {
+                            constraints::render_constraints_section(ui, shell);
+                        },
+                    );
                     section(ui, "Export", ph::EXPORT, None, |ui| {
                         export_row(ui, "STL");
                         export_row(ui, "STEP");
@@ -92,10 +105,6 @@ fn section(
         Stroke::new(1.0, ThemeColors::SEPARATOR_SOFT),
     );
     ui.add_space(6.0);
-}
-
-fn placeholder_row(ui: &mut Ui, label: &str) {
-    ui.colored_label(ThemeColors::TEXT_DIM, RichText::new(label).size(12.0));
 }
 
 fn section_badge(ui: &mut Ui, badge: &str) {

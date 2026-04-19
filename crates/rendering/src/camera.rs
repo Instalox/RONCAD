@@ -40,6 +40,24 @@ impl Camera2d {
     pub fn pan_pixels(&mut self, delta_px: DVec2) {
         self.center_mm += DVec2::new(-delta_px.x, delta_px.y) / self.pixels_per_mm;
     }
+
+    pub fn fit_bounds(
+        &mut self,
+        screen_size_px: DVec2,
+        min_mm: DVec2,
+        max_mm: DVec2,
+        padding_px: f64,
+    ) {
+        let width_mm = (max_mm.x - min_mm.x).abs().max(1.0);
+        let height_mm = (max_mm.y - min_mm.y).abs().max(1.0);
+        let usable_width_px = (screen_size_px.x - padding_px * 2.0).max(32.0);
+        let usable_height_px = (screen_size_px.y - padding_px * 2.0).max(32.0);
+
+        self.center_mm = (min_mm + max_mm) * 0.5;
+        self.pixels_per_mm = (usable_width_px / width_mm)
+            .min(usable_height_px / height_mm)
+            .clamp(0.1, 10_000.0);
+    }
 }
 
 /// Pick an adaptive grid step (mm) such that on-screen spacing stays at or
@@ -54,4 +72,26 @@ pub fn adaptive_grid_step_mm(pixels_per_mm: f64, min_pixel_spacing: f64) -> f64 
         }
     }
     decade
+}
+
+#[cfg(test)]
+mod tests {
+    use glam::dvec2;
+
+    use super::Camera2d;
+
+    #[test]
+    fn fit_bounds_centers_and_scales_camera() {
+        let mut camera = Camera2d::default();
+
+        camera.fit_bounds(
+            dvec2(400.0, 300.0),
+            dvec2(-10.0, -5.0),
+            dvec2(30.0, 15.0),
+            20.0,
+        );
+
+        assert_eq!(camera.center_mm, dvec2(10.0, 5.0));
+        assert!((camera.pixels_per_mm - 9.0).abs() < 1e-6);
+    }
 }

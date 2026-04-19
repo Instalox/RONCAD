@@ -45,7 +45,9 @@ pub fn render(ui: &mut Ui, shell: &mut ShellContext<'_>, response: &mut ShellRes
                     let _ = icon_button(ui, ph::FLOPPY_DISK, "Save project");
                     let _ = icon_button(ui, ph::ARROWS_COUNTER_CLOCKWISE, "Undo");
                     let _ = icon_button(ui, ph::ARROW_CLOCKWISE, "Redo");
-                    let _ = icon_button(ui, ph::PROJECTOR_SCREEN, "Fit view");
+                    if icon_button(ui, ph::PROJECTOR_SCREEN, "Fit view").clicked() {
+                        response.fit_view_requested = true;
+                    }
 
                     ui.push_id("toolbar_trailing", |ui| {
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {

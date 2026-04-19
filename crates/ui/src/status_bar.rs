@@ -111,6 +111,23 @@ fn status_context(shell: &ShellContext<'_>) -> Option<(String, egui::Color32)> {
     if let Some(summary) = preview_summary(shell.tool_manager.preview()) {
         return Some((summary, ThemeColors::tool_accent(kind)));
     }
+    if kind == ActiveToolKind::Extrude && shell.extrude_hud.is_open() {
+        if let Some(draft) = shell.extrude_hud.active() {
+            let distance = shell
+                .extrude_hud
+                .parsed_distance()
+                .map(|value| format!("{value:.3} mm"))
+                .unwrap_or_else(|| "invalid distance".to_string());
+            return Some((
+                format!(
+                    "Profile {:.3} mm^2   Distance {}",
+                    draft.profile.area(),
+                    distance
+                ),
+                ThemeColors::ACCENT,
+            ));
+        }
+    }
     if !shell.selection.is_empty() {
         return Some((
             format!("{} selected", shell.selection.len()),
@@ -135,7 +152,7 @@ fn status_hint(kind: ActiveToolKind, dynamic_active: bool) -> &'static str {
         ActiveToolKind::Arc => "Center, start, end",
         ActiveToolKind::Fillet => "Pick corner, then radius",
         ActiveToolKind::Dimension => "Pick points to dimension",
-        ActiveToolKind::Extrude => "Pick a closed profile",
+        ActiveToolKind::Extrude => "Click a closed profile",
     }
 }
 

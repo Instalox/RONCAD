@@ -2,10 +2,13 @@
 //! UI never owns geometry truth; it reads state and emits commands.
 
 mod command_palette;
+mod constraints;
 mod dimensions;
+mod extrude_state;
 mod hud_state;
 
 pub use command_palette::CommandPaletteState;
+pub use extrude_state::ExtrudeHudState;
 pub mod inspector;
 pub mod project_tree;
 pub mod right_sidebar;

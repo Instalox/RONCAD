@@ -72,6 +72,7 @@ impl CommandPaletteState {
 enum PaletteAction {
     Tool(ActiveToolKind),
     Command(AppCommand),
+    FitView,
 }
 
 #[derive(Clone)]
@@ -180,6 +181,18 @@ fn build_catalog(shell: &ShellContext<'_>) -> Vec<PaletteItem> {
             name: format!("Sketch {}", shell.project.sketches.len() + 1),
         }),
     });
+
+    if let Some(sketch) = shell.project.active_sketch() {
+        items.push(PaletteItem {
+            group: "View",
+            icon: ph::PROJECTOR_SCREEN,
+            label: "Fit active sketch".to_string(),
+            detail: Some(format!("{} entities", sketch.entities.len())),
+            shortcut: None,
+            search_text: "fit frame zoom active sketch view".to_string(),
+            action: PaletteAction::FitView,
+        });
+    }
 
     if !shell.selection.is_empty() {
         let count = shell.selection.len();
@@ -430,6 +443,7 @@ fn run_action(action: PaletteAction, shell: &mut ShellContext<'_>, response: &mu
     match action {
         PaletteAction::Tool(kind) => shell.tool_manager.set_active(kind),
         PaletteAction::Command(command) => response.commands.push(command),
+        PaletteAction::FitView => response.fit_view_requested = true,
     }
 }
 

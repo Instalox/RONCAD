@@ -19,6 +19,11 @@ pub(super) fn paint(
     let accent = ThemeColors::tool_accent(kind);
     let max_width = (rect.width() - HUD_PAD_X * 2.0).max(160.0);
     let hover_text = dimensions::hovered_target_summary(shell.project, hovered_target);
+    let step_text = if kind == ActiveToolKind::Extrude && shell.extrude_hud.is_open() {
+        "Set a distance, then apply the extrusion.".to_string()
+    } else {
+        shell.tool_manager.step_hint()
+    };
 
     Area::new(Id::new("viewport_hint_strip"))
         .order(Order::Foreground)
@@ -44,7 +49,7 @@ pub(super) fn paint(
                                     hud_sep(ui);
                                     ui.colored_label(
                                         ThemeColors::TEXT_MID,
-                                        RichText::new(shell.tool_manager.step_hint()).size(11.5),
+                                        RichText::new(step_text).size(11.5),
                                     );
 
                                     if !shell.tool_manager.dynamic_fields().is_empty() {
@@ -56,6 +61,13 @@ pub(super) fn paint(
                                     if let Some((key, label)) = modifier_hint(kind) {
                                         hud_sep(ui);
                                         hud_segment(ui, key, label);
+                                    }
+
+                                    if kind == ActiveToolKind::Extrude
+                                        && shell.extrude_hud.is_open()
+                                    {
+                                        hud_sep(ui);
+                                        hud_segment(ui, "Esc", "cancel");
                                     }
 
                                     hud_sep(ui);

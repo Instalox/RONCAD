@@ -4,6 +4,7 @@
 
 mod dimension_overlay;
 mod dynamic_overlay;
+mod extrude_overlay;
 mod grid_overlay;
 mod hud_overlay;
 mod mini_hud;
@@ -80,12 +81,14 @@ pub fn render_in_rect(
                     .hovered_target
                     .as_ref()
                     .and_then(HoverTarget::as_profile),
+                shell.extrude_hud.active_profile(),
             );
             snap_overlay::paint(ui.painter(), rect, shell.camera, shell.snap_result.as_ref());
             tool_overlay::paint_preview(ui.painter(), rect, shell.camera, shell.tool_manager);
             hud_overlay::paint(ui, rect, shell, interaction.hovered_target.as_ref());
             mini_hud::paint(ui, rect, shell, response);
             dynamic_overlay::paint(ui, rect, shell);
+            extrude_overlay::paint(ui, rect, shell, response);
         });
 }
 
