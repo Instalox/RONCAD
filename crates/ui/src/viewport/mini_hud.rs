@@ -4,7 +4,10 @@
 //! user opening the inspector. The HUD also echoes the active snap and tool
 //! so context stays close to the cursor.
 
-use egui::{Area, Frame, Id, Key, Margin, Order, Pos2, Rect, Stroke, Ui, Vec2};
+use egui::{
+    text::{CCursor, CCursorRange},
+    Area, Frame, Id, Key, Margin, Order, Pos2, Rect, Stroke, Ui, Vec2,
+};
 use glam::DVec2;
 use roncad_core::command::AppCommand;
 use roncad_core::selection::{Selection, SelectionItem};
@@ -260,6 +263,7 @@ fn render_field(
 
             if text_edit.gained_focus() {
                 state.focus_index = Some(index);
+                select_all_text(ui, text_edit.id, buffer.chars().count());
             }
 
             let submitted = text_edit.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter));
@@ -408,12 +412,23 @@ fn format_value(value: f64) -> String {
     format!("{value:.3}")
 }
 
+fn select_all_text(ui: &Ui, widget_id: Id, len: usize) {
+    let mut state = egui::TextEdit::load_state(ui.ctx(), widget_id).unwrap_or_default();
+    state
+        .cursor
+        .set_char_range(Some(CCursorRange::two(CCursor::new(0), CCursor::new(len))));
+    egui::TextEdit::store_state(ui.ctx(), widget_id, state);
+}
+
 #[cfg(test)]
 mod tests {
     use egui::{pos2, Rect};
     use roncad_core::selection::SelectionItem;
 
-    use super::{ensure_buffers, mini_hud_pos, mini_hud_size, Field, FieldKind, HudEditState};
+    use super::{
+        ensure_buffers, mini_hud_pos, mini_hud_size, select_all_text, Field, FieldKind,
+        HudEditState,
+    };
 
     #[test]
     fn ensure_buffers_tracks_selected_item() {
@@ -460,5 +475,24 @@ mod tests {
         assert!(hud_pos.y >= 0.0);
         assert!(hud_pos.x + size.x <= rect.max.x + 0.1);
         assert!(hud_pos.y + size.y <= rect.max.y + 0.1);
+    }
+
+    #[test]
+    fn select_all_text_marks_entire_value() {
+        egui::__run_test_ui(|ui| {
+            let id = egui::Id::new("mini_hud_select_all");
+
+            select_all_text(ui, id, 5);
+
+            let state = egui::TextEdit::load_state(ui.ctx(), id).expect("stored text edit state");
+            let range = state.cursor.char_range().expect("selection range");
+            assert_eq!(
+                range,
+                egui::text::CCursorRange::two(
+                    egui::text::CCursor::new(0),
+                    egui::text::CCursor::new(5),
+                )
+            );
+        });
     }
 }

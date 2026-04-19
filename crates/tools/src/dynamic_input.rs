@@ -13,30 +13,35 @@ use crate::tool::{DynamicField, Tool, ToolContext, ToolPreview};
 pub struct DynamicInputState {
     buffers: Vec<String>,
     active: usize,
+    replace_on_next_edit: bool,
 }
 
 impl DynamicInputState {
     pub fn clear(&mut self) {
         self.buffers.clear();
         self.active = 0;
+        self.replace_on_next_edit = false;
     }
 
     pub fn sync(&mut self, field_count: usize) {
         if self.buffers.len() != field_count {
             self.buffers = vec![String::new(); field_count];
             self.active = 0;
+            self.replace_on_next_edit = false;
         }
     }
 
     pub fn cycle(&mut self) {
         if !self.buffers.is_empty() {
             self.active = (self.active + 1) % self.buffers.len();
+            self.replace_on_next_edit = true;
         }
     }
 
     pub fn cycle_back(&mut self) {
         if !self.buffers.is_empty() {
             self.active = (self.active + self.buffers.len() - 1) % self.buffers.len();
+            self.replace_on_next_edit = true;
         }
     }
 
@@ -64,6 +69,7 @@ impl DynamicInputState {
             return false;
         }
         buffer.clear();
+        self.replace_on_next_edit = false;
         true
     }
 
@@ -76,6 +82,18 @@ impl DynamicInputState {
         };
 
         for ch in chars {
+            let can_append = if self.replace_on_next_edit {
+                can_append_typed_char("", ch)
+            } else {
+                can_append_typed_char(buffer, ch)
+            };
+            if !can_append {
+                continue;
+            }
+            if self.replace_on_next_edit {
+                buffer.clear();
+                self.replace_on_next_edit = false;
+            }
             append_typed_char(buffer, ch);
         }
     }
@@ -84,6 +102,12 @@ impl DynamicInputState {
         let Some(buffer) = self.buffers.get_mut(self.active) else {
             return false;
         };
+        if self.replace_on_next_edit {
+            let had_text = !buffer.is_empty();
+            buffer.clear();
+            self.replace_on_next_edit = false;
+            return had_text;
+        }
         buffer.pop().is_some()
     }
 
@@ -231,20 +255,18 @@ fn format_dynamic_value(field: &DynamicField, value: f64) -> String {
     }
 }
 
-fn append_typed_char(buffer: &mut String, ch: char) {
+fn can_append_typed_char(buffer: &str, ch: char) -> bool {
     match ch {
-        '0'..='9' => buffer.push(ch),
-        '.' => {
-            if !buffer.contains('.') {
-                buffer.push('.');
-            }
-        }
-        '-' => {
-            if buffer.is_empty() {
-                buffer.push('-');
-            }
-        }
-        _ => {}
+        '0'..='9' => true,
+        '.' => !buffer.contains('.'),
+        '-' => buffer.is_empty(),
+        _ => false,
+    }
+}
+
+fn append_typed_char(buffer: &mut String, ch: char) {
+    if can_append_typed_char(buffer, ch) {
+        buffer.push(ch);
     }
 }
 
@@ -352,5 +374,42 @@ mod tests {
 
         assert!(state.backspace_active());
         assert_eq!(state.buffer_text(0), Some("1"));
+    }
+
+    #[test]
+    fn typing_after_cycle_replaces_existing_field_value() {
+        let mut state = DynamicInputState::default();
+        state.sync(2);
+        state.append_typed_chars("12.5".chars());
+
+        state.cycle();
+        state.cycle_back();
+        state.append_typed_chars("3".chars());
+
+        assert_eq!(state.buffer_text(0), Some("3"));
+    }
+
+    #[test]
+    fn typing_decimal_after_cycle_replaces_existing_decimal_value() {
+        let mut state = DynamicInputState::default();
+        state.sync(1);
+        state.append_typed_chars("12.5".chars());
+
+        state.cycle();
+        state.append_typed_chars(['.', '5']);
+
+        assert_eq!(state.buffer_text(0), Some(".5"));
+    }
+
+    #[test]
+    fn backspace_after_cycle_clears_selected_field_value() {
+        let mut state = DynamicInputState::default();
+        state.sync(1);
+        state.append_typed_chars("12.5".chars());
+
+        state.cycle();
+
+        assert!(state.backspace_active());
+        assert_eq!(state.buffer_text(0), Some(""));
     }
 }
