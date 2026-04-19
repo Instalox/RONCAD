@@ -4,7 +4,7 @@
 //! the actual keystroke capture lives in the app-side interaction controller.
 
 use egui::{Area, Color32, Frame, Id, Margin, Order, Pos2, Rect, Stroke, Ui, Vec2};
-use roncad_tools::DynamicFieldVisualState;
+use roncad_tools::{DynamicFieldView, DynamicFieldVisualState};
 
 use super::{screen_center, to_pos};
 use crate::shell::ShellContext;
@@ -12,9 +12,15 @@ use crate::theme::ThemeColors;
 
 const DYNAMIC_HUD_GAP: f32 = 18.0;
 const DYNAMIC_HUD_PAD: f32 = 8.0;
-const DYNAMIC_HUD_MIN_WIDTH: f32 = 112.0;
-const DYNAMIC_HUD_ROW_HEIGHT: f32 = 20.0;
-const DYNAMIC_HUD_HINT_HEIGHT: f32 = 16.0;
+const DYNAMIC_HUD_MIN_WIDTH: f32 = 96.0;
+const DYNAMIC_HUD_MAX_WIDTH: f32 = 176.0;
+const DYNAMIC_HUD_ROW_HEIGHT: f32 = 18.0;
+const DYNAMIC_HUD_HINT_HEIGHT: f32 = 14.0;
+const DYNAMIC_HUD_LABEL_CHAR_WIDTH: f32 = 6.6;
+const DYNAMIC_HUD_VALUE_CHAR_WIDTH: f32 = 7.4;
+const DYNAMIC_HUD_UNIT_WIDTH: f32 = 20.0;
+const DYNAMIC_HUD_ROW_GAP: f32 = 18.0;
+const DYNAMIC_HUD_FRAME_WIDTH: f32 = 12.0;
 
 pub(super) fn paint(ui: &mut Ui, rect: Rect, shell: &ShellContext<'_>) {
     let views = shell.tool_manager.dynamic_views();
@@ -27,7 +33,8 @@ pub(super) fn paint(ui: &mut Ui, rect: Rect, shell: &ShellContext<'_>) {
     };
     let center = screen_center(rect);
     let cursor_screen = to_pos(shell.camera.world_to_screen(cursor_world, center));
-    let hud_pos = dynamic_hud_pos(cursor_screen, rect, views.len());
+    let hud_size = fitted_dynamic_hud_size(dynamic_hud_size(&views), rect);
+    let hud_pos = dynamic_hud_pos(cursor_screen, rect, hud_size);
 
     let accent = ThemeColors::tool_accent(shell.tool_manager.active_kind());
 
@@ -43,7 +50,8 @@ pub(super) fn paint(ui: &mut Ui, rect: Rect, shell: &ShellContext<'_>) {
                 .inner_margin(Margin::symmetric(6, 4))
                 .corner_radius(3.0_f32)
                 .show(ui, |ui| {
-                    ui.set_min_width(DYNAMIC_HUD_MIN_WIDTH);
+                    ui.set_min_width(hud_size.x);
+                    ui.set_max_width(hud_size.x);
                     ui.vertical(|ui| {
                         for view in &views {
                             render_row(ui, view, accent);
@@ -84,11 +92,7 @@ fn render_row(ui: &mut Ui, view: &roncad_tools::DynamicFieldView, accent: Color3
                 DynamicFieldVisualState::InvalidParse
                 | DynamicFieldVisualState::InvalidGeometry => Color32::from_rgb(0xD9, 0x62, 0x62),
             };
-            let shown = if view.active && !view.text.is_empty() {
-                format!("[{}]", view.text)
-            } else {
-                view.text.clone()
-            };
+            let shown = display_text(view);
             ui.colored_label(
                 value_color,
                 egui::RichText::new(shown).monospace().strong().size(12.0),
@@ -97,8 +101,15 @@ fn render_row(ui: &mut Ui, view: &roncad_tools::DynamicFieldView, accent: Color3
     });
 }
 
-fn dynamic_hud_pos(cursor: Pos2, rect: Rect, field_count: usize) -> Pos2 {
-    let size = dynamic_hud_size(field_count);
+fn display_text(view: &DynamicFieldView) -> String {
+    if view.active && !view.text.is_empty() {
+        format!("[{}]", view.text)
+    } else {
+        view.text.clone()
+    }
+}
+
+fn dynamic_hud_pos(cursor: Pos2, rect: Rect, size: Vec2) -> Pos2 {
     let min_x = rect.min.x + DYNAMIC_HUD_PAD;
     let max_x = rect.max.x - size.x - DYNAMIC_HUD_PAD;
     let min_y = rect.min.y + DYNAMIC_HUD_PAD;
@@ -126,26 +137,68 @@ fn dynamic_hud_pos(cursor: Pos2, rect: Rect, field_count: usize) -> Pos2 {
     Pos2::new(x, y)
 }
 
-fn dynamic_hud_size(field_count: usize) -> Vec2 {
+fn dynamic_hud_size(views: &[DynamicFieldView]) -> Vec2 {
+    let label_width = views
+        .iter()
+        .map(|view| view.label.chars().count() as f32 * DYNAMIC_HUD_LABEL_CHAR_WIDTH)
+        .fold(0.0, f32::max);
+    let value_width = views
+        .iter()
+        .map(|view| display_text(view).chars().count() as f32 * DYNAMIC_HUD_VALUE_CHAR_WIDTH)
+        .fold(0.0, f32::max);
+    let row_width = DYNAMIC_HUD_FRAME_WIDTH
+        + label_width
+        + DYNAMIC_HUD_ROW_GAP
+        + value_width
+        + DYNAMIC_HUD_UNIT_WIDTH;
+    let width = row_width.clamp(DYNAMIC_HUD_MIN_WIDTH, DYNAMIC_HUD_MAX_WIDTH);
+
     Vec2::new(
-        DYNAMIC_HUD_MIN_WIDTH,
-        10.0 + field_count as f32 * DYNAMIC_HUD_ROW_HEIGHT + DYNAMIC_HUD_HINT_HEIGHT,
+        width,
+        9.0 + views.len() as f32 * DYNAMIC_HUD_ROW_HEIGHT + DYNAMIC_HUD_HINT_HEIGHT,
+    )
+}
+
+fn fitted_dynamic_hud_size(size: Vec2, rect: Rect) -> Vec2 {
+    Vec2::new(
+        size.x.min((rect.width() - DYNAMIC_HUD_PAD * 2.0).max(0.0)),
+        size.y.min((rect.height() - DYNAMIC_HUD_PAD * 2.0).max(0.0)),
     )
 }
 
 #[cfg(test)]
 mod tests {
     use egui::{pos2, Rect};
+    use roncad_tools::{DynamicFieldView, DynamicFieldVisualState};
 
-    use super::{dynamic_hud_pos, dynamic_hud_size};
+    use super::{dynamic_hud_pos, dynamic_hud_size, fitted_dynamic_hud_size};
+
+    fn sample_views() -> Vec<DynamicFieldView> {
+        vec![
+            DynamicFieldView {
+                label: "Length",
+                unit: "mm",
+                text: "8.602".to_string(),
+                active: true,
+                state: DynamicFieldVisualState::Valid,
+            },
+            DynamicFieldView {
+                label: "Angle",
+                unit: "deg",
+                text: "144.5".to_string(),
+                active: false,
+                state: DynamicFieldVisualState::Preview,
+            },
+        ]
+    }
 
     #[test]
     fn dynamic_hud_flips_left_when_near_right_edge() {
         let rect = Rect::from_min_max(pos2(0.0, 0.0), pos2(400.0, 280.0));
         let cursor = pos2(360.0, 120.0);
+        let size = fitted_dynamic_hud_size(dynamic_hud_size(&sample_views()), rect);
 
-        let pos = dynamic_hud_pos(cursor, rect, 2);
-        let size = dynamic_hud_size(2);
+        let pos = dynamic_hud_pos(cursor, rect, size);
 
         assert!(pos.x + size.x <= cursor.x);
     }
@@ -154,9 +207,9 @@ mod tests {
     fn dynamic_hud_flips_up_when_near_bottom_edge() {
         let rect = Rect::from_min_max(pos2(0.0, 0.0), pos2(400.0, 280.0));
         let cursor = pos2(120.0, 250.0);
+        let size = fitted_dynamic_hud_size(dynamic_hud_size(&sample_views()), rect);
 
-        let pos = dynamic_hud_pos(cursor, rect, 2);
-        let size = dynamic_hud_size(2);
+        let pos = dynamic_hud_pos(cursor, rect, size);
 
         assert!(pos.y + size.y <= cursor.y);
     }
@@ -165,13 +218,22 @@ mod tests {
     fn dynamic_hud_stays_inside_viewport() {
         let rect = Rect::from_min_max(pos2(0.0, 0.0), pos2(130.0, 90.0));
         let cursor = pos2(120.0, 80.0);
+        let size = fitted_dynamic_hud_size(dynamic_hud_size(&sample_views()), rect);
 
-        let pos = dynamic_hud_pos(cursor, rect, 2);
-        let size = dynamic_hud_size(2);
+        let pos = dynamic_hud_pos(cursor, rect, size);
 
         assert!(pos.x >= rect.min.x);
         assert!(pos.y >= rect.min.y);
         assert!(pos.x + size.x <= rect.max.x + 0.1);
         assert!(pos.y + size.y <= rect.max.y + 0.1);
+    }
+
+    #[test]
+    fn dynamic_hud_stays_compact_for_two_field_line_input() {
+        let rect = Rect::from_min_max(pos2(0.0, 0.0), pos2(400.0, 280.0));
+        let size = fitted_dynamic_hud_size(dynamic_hud_size(&sample_views()), rect);
+
+        assert!(size.x <= 176.0);
+        assert!(size.x >= 120.0);
     }
 }

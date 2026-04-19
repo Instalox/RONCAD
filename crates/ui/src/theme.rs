@@ -10,6 +10,7 @@ impl ThemeColors {
     pub const BG_DEEP: Color32 = Color32::from_rgb(0x14, 0x16, 0x1A);
     pub const BG_PANEL: Color32 = Color32::from_rgb(0x1B, 0x1E, 0x24);
     pub const BG_PANEL_ALT: Color32 = Color32::from_rgb(0x21, 0x25, 0x2C);
+    pub const BG_ELEV: Color32 = Color32::from_rgb(0x1C, 0x20, 0x28);
     pub const BG_PANEL_GLASS: Color32 = Color32::from_rgba_premultiplied(0x1B, 0x1E, 0x24, 0xD4);
     pub const BG_PANEL_ALT_GLASS: Color32 =
         Color32::from_rgba_premultiplied(0x21, 0x25, 0x2C, 0xB8);
@@ -18,14 +19,18 @@ impl ThemeColors {
     pub const BG_HOVER: Color32 = Color32::from_rgb(0x2A, 0x2F, 0x38);
     pub const BG_ACTIVE: Color32 = Color32::from_rgb(0x34, 0x3A, 0x45);
     pub const SEPARATOR: Color32 = Color32::from_rgb(0x2C, 0x30, 0x38);
+    pub const SEPARATOR_SOFT: Color32 = Color32::from_rgb(0x24, 0x28, 0x30);
     pub const TEXT: Color32 = Color32::from_rgb(0xDC, 0xDF, 0xE4);
+    pub const TEXT_MID: Color32 = Color32::from_rgb(0x9B, 0xA1, 0xAC);
     pub const TEXT_DIM: Color32 = Color32::from_rgb(0x8A, 0x91, 0x9C);
+    pub const TEXT_FAINT: Color32 = Color32::from_rgb(0x47, 0x4C, 0x56);
     pub const ACCENT: Color32 = Color32::from_rgb(0x4F, 0xA3, 0xF7);
     pub const ACCENT_DIM: Color32 = Color32::from_rgb(0x2C, 0x5E, 0x93);
     pub const ACCENT_AMBER: Color32 = Color32::from_rgb(0xE2, 0xA2, 0x46);
     pub const ACCENT_AMBER_DIM: Color32 = Color32::from_rgb(0x7C, 0x56, 0x22);
     pub const GRID_MAJOR: Color32 = Color32::from_rgb(0x2F, 0x35, 0x3F);
     pub const GRID_MINOR: Color32 = Color32::from_rgb(0x22, 0x26, 0x2D);
+    pub const GRID_DOT: Color32 = Color32::from_rgb(0x35, 0x3C, 0x47);
     pub const GRID_AXIS_X: Color32 = Color32::from_rgb(0xD0, 0x4B, 0x4B);
     pub const GRID_AXIS_Y: Color32 = Color32::from_rgb(0x4B, 0xC0, 0x6B);
 
