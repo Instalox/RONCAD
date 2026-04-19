@@ -5,4 +5,4 @@ pub mod body_mesh;
 pub mod camera;
 
 pub use body_mesh::{extrude_mesh, ExtrudeMesh3d, MeshTriangle3d};
-pub use camera::{adaptive_grid_step_mm, Camera2d};
+pub use camera::{adaptive_grid_step_mm, Camera2d, Projection};

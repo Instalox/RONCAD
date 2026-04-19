@@ -3,6 +3,8 @@
 //! state, and emits AppCommand instances while the UI crate stays focused on
 //! layout and painting.
 
+use std::f64::consts::{FRAC_PI_2, PI};
+
 use egui::{Key, PointerButton, Pos2, Rect, Ui};
 use glam::DVec2;
 use roncad_core::command::AppCommand;
@@ -11,6 +13,9 @@ use roncad_tools::{
     ActiveToolKind, Modifiers, SnapEngine, SnapResult, ToolContext, ENTITY_PICK_RADIUS_PX,
 };
 use roncad_ui::{ShellContext, ShellResponse, ViewportInteractionState};
+
+const NUMPAD_ORBIT_STEP_RADIANS: f64 = PI / 12.0; // 15°
+const NUMPAD_DOLLY_FACTOR: f64 = 1.2;
 
 pub fn handle_viewport_interaction(
     ui: &Ui,
@@ -122,14 +127,29 @@ pub fn handle_viewport_interaction(
     let pointer_delta = DVec2::new(pointer_delta.x as f64, pointer_delta.y as f64);
 
     if resp.dragged_by(PointerButton::Middle) {
-        shell.camera.orbit_pixels(pointer_delta);
-    } else if resp.dragged_by(PointerButton::Secondary) {
-        if let Some(workplane) = active_workplane(shell).cloned() {
-            shell
-                .camera
-                .pan_pixels_on_workplane(pointer_delta, center, &workplane);
+        if modifiers.shift {
+            if let Some(workplane) = active_workplane(shell).cloned() {
+                shell
+                    .camera
+                    .pan_pixels_on_workplane(pointer_delta, center, &workplane);
+            } else {
+                shell.camera.pan_pixels(pointer_delta, center);
+            }
+        } else if modifiers.ctrl {
+            let factor = (-pointer_delta.y * 0.005).exp();
+            let pivot = resp
+                .interact_pointer_pos()
+                .map(pos_to_dvec)
+                .unwrap_or(center);
+            if let Some(workplane) = active_workplane(shell).cloned() {
+                shell
+                    .camera
+                    .zoom_about_workplane(pivot, center, factor, &workplane);
+            } else {
+                shell.camera.zoom_about(pivot, center, factor);
+            }
         } else {
-            shell.camera.pan_pixels(pointer_delta, center);
+            shell.camera.orbit_pixels(pointer_delta);
         }
     }
 
@@ -152,6 +172,10 @@ pub fn handle_viewport_interaction(
                 }
             }
         }
+    }
+
+    if !palette_open {
+        handle_numpad_navigation(ui, shell, response);
     }
 
     ViewportInteractionState { hovered_target }
@@ -261,6 +285,89 @@ fn handle_dynamic_input(
         if let Some(world) = cursor_world {
             let commands = shell.tool_manager.commit_dynamic(ctx, world);
             response.commands.extend(commands);
+        }
+    }
+}
+
+fn handle_numpad_navigation(
+    ui: &Ui,
+    shell: &mut ShellContext<'_>,
+    response: &mut ShellResponse,
+) {
+    if ui.ctx().egui_wants_keyboard_input() {
+        return;
+    }
+
+    let none = egui::Modifiers::NONE;
+    let ctrl = egui::Modifiers::CTRL;
+
+    enum NumpadAction {
+        SetOrientation(f64, f64),
+        Orbit(f64, f64),
+        Dolly(f64),
+        ToggleProjection,
+        FitSelection,
+        FitAll,
+    }
+
+    let action = ui.ctx().input_mut(|input| {
+        if input.consume_key(none, Key::Num7) {
+            Some(NumpadAction::SetOrientation(FRAC_PI_2, FRAC_PI_2))
+        } else if input.consume_key(ctrl, Key::Num7) {
+            Some(NumpadAction::SetOrientation(FRAC_PI_2, -FRAC_PI_2))
+        } else if input.consume_key(none, Key::Num1) {
+            Some(NumpadAction::SetOrientation(FRAC_PI_2, 0.0))
+        } else if input.consume_key(ctrl, Key::Num1) {
+            Some(NumpadAction::SetOrientation(-FRAC_PI_2, 0.0))
+        } else if input.consume_key(none, Key::Num3) {
+            Some(NumpadAction::SetOrientation(PI, 0.0))
+        } else if input.consume_key(ctrl, Key::Num3) {
+            Some(NumpadAction::SetOrientation(0.0, 0.0))
+        } else if input.consume_key(none, Key::Num4) {
+            Some(NumpadAction::Orbit(-NUMPAD_ORBIT_STEP_RADIANS, 0.0))
+        } else if input.consume_key(none, Key::Num6) {
+            Some(NumpadAction::Orbit(NUMPAD_ORBIT_STEP_RADIANS, 0.0))
+        } else if input.consume_key(none, Key::Num8) {
+            Some(NumpadAction::Orbit(0.0, NUMPAD_ORBIT_STEP_RADIANS))
+        } else if input.consume_key(none, Key::Num2) {
+            Some(NumpadAction::Orbit(0.0, -NUMPAD_ORBIT_STEP_RADIANS))
+        } else if input.consume_key(none, Key::Num9) {
+            Some(NumpadAction::Orbit(PI, 0.0))
+        } else if input.consume_key(none, Key::Num5) {
+            Some(NumpadAction::ToggleProjection)
+        } else if input.consume_key(none, Key::Plus) || input.consume_key(none, Key::Equals) {
+            Some(NumpadAction::Dolly(NUMPAD_DOLLY_FACTOR))
+        } else if input.consume_key(none, Key::Minus) {
+            Some(NumpadAction::Dolly(1.0 / NUMPAD_DOLLY_FACTOR))
+        } else if input.consume_key(none, Key::Period) {
+            Some(NumpadAction::FitSelection)
+        } else if input.consume_key(none, Key::Home) {
+            Some(NumpadAction::FitAll)
+        } else {
+            None
+        }
+    });
+
+    let Some(action) = action else { return };
+    match action {
+        NumpadAction::SetOrientation(yaw, pitch) => {
+            shell.camera.set_orientation(yaw, pitch);
+        }
+        NumpadAction::Orbit(yaw, pitch) => {
+            shell.camera.orbit_radians(yaw, pitch);
+        }
+        NumpadAction::Dolly(factor) => {
+            shell.camera.dolly_step(factor);
+        }
+        NumpadAction::ToggleProjection => {
+            shell.camera.toggle_projection();
+            ui.ctx().request_repaint();
+        }
+        NumpadAction::FitSelection => {
+            response.fit_selection_requested = true;
+        }
+        NumpadAction::FitAll => {
+            response.fit_view_requested = true;
         }
     }
 }

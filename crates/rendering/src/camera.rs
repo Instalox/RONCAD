@@ -1,15 +1,19 @@
-//! Perspective orbit camera used by the egui-painted viewport.
+//! Perspective/orthographic orbit camera used by the egui-painted viewport.
 //! The legacy `Camera2d` name remains for now to limit churn across the app.
 
 use glam::{DVec2, DVec3};
 use roncad_geometry::Workplane;
 
-const MIN_PITCH_RADIANS: f64 = 0.0;
-const MAX_PITCH_RADIANS: f64 = 89.5_f64.to_radians();
 const MIN_ORBIT_RADIUS_MM: f64 = 8.0;
 const MAX_ORBIT_RADIUS_MM: f64 = 100_000.0;
 const NEAR_PLANE_MM: f64 = 0.1;
 const ORBIT_RADIANS_PER_PIXEL: f64 = 0.01;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Projection {
+    Perspective,
+    Orthographic,
+}
 
 #[derive(Debug, Clone, Copy)]
 pub struct Camera2d {
@@ -22,6 +26,7 @@ pub struct Camera2d {
     viewport_size_px: DVec2,
     scale_axis_u_world: DVec3,
     scale_axis_v_world: DVec3,
+    projection: Projection,
 }
 
 impl Default for Camera2d {
@@ -29,13 +34,14 @@ impl Default for Camera2d {
         let mut camera = Self {
             pixels_per_mm: 2.0,
             target_mm: DVec3::ZERO,
-            yaw_radians: -35.0_f64.to_radians(),
-            pitch_radians: 32.0_f64.to_radians(),
+            yaw_radians: 120.0_f64.to_radians(),
+            pitch_radians: 30.0_f64.to_radians(),
             orbit_radius_mm: 240.0,
             vertical_fov_radians: 40.0_f64.to_radians(),
             viewport_size_px: DVec2::new(1200.0, 800.0),
             scale_axis_u_world: DVec3::X,
             scale_axis_v_world: DVec3::Y,
+            projection: Projection::Perspective,
         };
         camera.refresh_pixels_per_mm();
         camera
@@ -57,14 +63,24 @@ impl Camera2d {
         let (right, up, forward) = self.basis();
         let view = world_mm - self.eye_mm();
         let depth = view.dot(forward);
-        if depth <= NEAR_PLANE_MM {
-            return None;
-        }
 
-        let focal = self.focal_length_px();
-        let x = view.dot(right) * focal / depth;
-        let y = view.dot(up) * focal / depth;
-        Some(DVec2::new(screen_center.x + x, screen_center.y - y))
+        match self.projection {
+            Projection::Perspective => {
+                if depth <= NEAR_PLANE_MM {
+                    return None;
+                }
+                let focal = self.focal_length_px();
+                let x = view.dot(right) * focal / depth;
+                let y = view.dot(up) * focal / depth;
+                Some(DVec2::new(screen_center.x + x, screen_center.y - y))
+            }
+            Projection::Orthographic => {
+                let scale = self.ortho_pixels_per_mm();
+                let x = view.dot(right) * scale;
+                let y = view.dot(up) * scale;
+                Some(DVec2::new(screen_center.x + x, screen_center.y - y))
+            }
+        }
     }
 
     pub fn screen_to_world(&self, screen: DVec2, screen_center: DVec2) -> DVec2 {
@@ -78,20 +94,19 @@ impl Camera2d {
         screen_center: DVec2,
         workplane: &Workplane,
     ) -> Option<DVec2> {
-        let eye = self.eye_mm();
-        let ray = self.screen_ray(screen, screen_center);
+        let (origin, ray) = self.screen_ray_with_origin(screen, screen_center);
         let normal = workplane.normal();
         let denom = ray.dot(normal);
         if denom.abs() <= f64::EPSILON {
             return None;
         }
 
-        let t = (workplane.origin - eye).dot(normal) / denom;
+        let t = (workplane.origin - origin).dot(normal) / denom;
         if t <= 0.0 {
             return None;
         }
 
-        let world = eye + ray * t;
+        let world = origin + ray * t;
         Some(workplane.world_to_local(world))
     }
 
@@ -101,18 +116,17 @@ impl Camera2d {
         screen_center: DVec2,
         plane_z_mm: f64,
     ) -> Option<DVec2> {
-        let eye = self.eye_mm();
-        let ray = self.screen_ray(screen, screen_center);
+        let (origin, ray) = self.screen_ray_with_origin(screen, screen_center);
         if ray.z.abs() <= f64::EPSILON {
             return None;
         }
 
-        let t = (plane_z_mm - eye.z) / ray.z;
+        let t = (plane_z_mm - origin.z) / ray.z;
         if t <= 0.0 {
             return None;
         }
 
-        let point = eye + ray * t;
+        let point = origin + ray * t;
         Some(point.truncate())
     }
 
@@ -186,9 +200,49 @@ impl Camera2d {
             return;
         }
 
-        self.yaw_radians -= delta_px.x * ORBIT_RADIANS_PER_PIXEL;
-        self.pitch_radians = (self.pitch_radians + delta_px.y * ORBIT_RADIANS_PER_PIXEL)
-            .clamp(MIN_PITCH_RADIANS, MAX_PITCH_RADIANS);
+        self.yaw_radians += delta_px.x * ORBIT_RADIANS_PER_PIXEL;
+        self.pitch_radians -= delta_px.y * ORBIT_RADIANS_PER_PIXEL;
+        self.normalize_angles();
+        self.refresh_pixels_per_mm();
+    }
+
+    pub fn orbit_radians(&mut self, yaw_delta: f64, pitch_delta: f64) {
+        self.yaw_radians += yaw_delta;
+        self.pitch_radians += pitch_delta;
+        self.normalize_angles();
+        self.refresh_pixels_per_mm();
+    }
+
+    pub fn dolly_step(&mut self, factor: f64) {
+        if factor <= 0.0 || !factor.is_finite() {
+            return;
+        }
+        self.orbit_radius_mm =
+            (self.orbit_radius_mm / factor).clamp(MIN_ORBIT_RADIUS_MM, MAX_ORBIT_RADIUS_MM);
+        self.refresh_pixels_per_mm();
+    }
+
+    pub fn set_orientation(&mut self, yaw_radians: f64, pitch_radians: f64) {
+        self.yaw_radians = yaw_radians;
+        self.pitch_radians = pitch_radians;
+        self.normalize_angles();
+        self.refresh_pixels_per_mm();
+    }
+
+    pub fn projection(&self) -> Projection {
+        self.projection
+    }
+
+    pub fn set_projection(&mut self, projection: Projection) {
+        self.projection = projection;
+        self.refresh_pixels_per_mm();
+    }
+
+    pub fn toggle_projection(&mut self) {
+        self.projection = match self.projection {
+            Projection::Perspective => Projection::Orthographic,
+            Projection::Orthographic => Projection::Perspective,
+        };
         self.refresh_pixels_per_mm();
     }
 
@@ -214,8 +268,16 @@ impl Camera2d {
             let x = relative.dot(right).abs();
             let y = relative.dot(up).abs();
             let z = relative.dot(forward);
-            required_distance = required_distance.max(focal * x / usable_half_width - z);
-            required_distance = required_distance.max(focal * y / usable_half_height - z);
+            match self.projection {
+                Projection::Perspective => {
+                    required_distance = required_distance.max(focal * x / usable_half_width - z);
+                    required_distance = required_distance.max(focal * y / usable_half_height - z);
+                }
+                Projection::Orthographic => {
+                    required_distance = required_distance.max(focal * x / usable_half_width);
+                    required_distance = required_distance.max(focal * y / usable_half_height);
+                }
+            }
         }
 
         self.orbit_radius_mm = required_distance.clamp(MIN_ORBIT_RADIUS_MM, MAX_ORBIT_RADIUS_MM);
@@ -225,12 +287,11 @@ impl Camera2d {
     pub fn align_to_workplane(&mut self, workplane: &Workplane) {
         let forward = -workplane.normal();
         self.yaw_radians = forward.y.atan2(forward.x);
-        self.pitch_radians = (-forward.z)
-            .asin()
-            .clamp(MIN_PITCH_RADIANS, MAX_PITCH_RADIANS);
+        self.pitch_radians = (-forward.z).asin();
         self.target_mm = workplane.origin;
         self.scale_axis_u_world = workplane.u.normalize();
         self.scale_axis_v_world = workplane.v.normalize();
+        self.normalize_angles();
         self.refresh_pixels_per_mm();
     }
 
@@ -257,29 +318,44 @@ impl Camera2d {
         self.viewport_size_px
     }
 
-    fn screen_ray(&self, screen: DVec2, screen_center: DVec2) -> DVec3 {
-        let focal = self.focal_length_px();
+    fn screen_ray_with_origin(&self, screen: DVec2, screen_center: DVec2) -> (DVec3, DVec3) {
         let (right, up, forward) = self.basis();
-        let x = (screen.x - screen_center.x) / focal;
-        let y = -(screen.y - screen_center.y) / focal;
-        (forward + right * x + up * y).normalize()
+        match self.projection {
+            Projection::Perspective => {
+                let focal = self.focal_length_px();
+                let x = (screen.x - screen_center.x) / focal;
+                let y = -(screen.y - screen_center.y) / focal;
+                (self.eye_mm(), (forward + right * x + up * y).normalize())
+            }
+            Projection::Orthographic => {
+                let scale = self.ortho_pixels_per_mm().max(f64::EPSILON);
+                let x_mm = (screen.x - screen_center.x) / scale;
+                let y_mm = -(screen.y - screen_center.y) / scale;
+                (self.eye_mm() + right * x_mm + up * y_mm, forward)
+            }
+        }
+    }
+
+    fn ortho_pixels_per_mm(&self) -> f64 {
+        self.focal_length_px() / self.orbit_radius_mm.max(MIN_ORBIT_RADIUS_MM)
+    }
+
+    fn normalize_angles(&mut self) {
+        let two_pi = std::f64::consts::TAU;
+        self.yaw_radians = self.yaw_radians.rem_euclid(two_pi);
+        self.pitch_radians = wrap_signed(self.pitch_radians);
     }
 
     fn basis(&self) -> (DVec3, DVec3, DVec3) {
+        // Analytic Z-up turntable basis; well-defined at every pitch including
+        // ±π/2, so the camera can pass through the poles without a fallback hack.
         let cos_pitch = self.pitch_radians.cos();
-        let forward = DVec3::new(
-            cos_pitch * self.yaw_radians.cos(),
-            cos_pitch * self.yaw_radians.sin(),
-            -self.pitch_radians.sin(),
-        )
-        .normalize();
-        let world_up = if forward.dot(DVec3::Z).abs() > 0.999 {
-            DVec3::Y
-        } else {
-            DVec3::Z
-        };
-        let right = world_up.cross(forward).normalize();
-        let up = forward.cross(right).normalize();
+        let sin_pitch = self.pitch_radians.sin();
+        let cos_yaw = self.yaw_radians.cos();
+        let sin_yaw = self.yaw_radians.sin();
+        let forward = DVec3::new(cos_yaw * cos_pitch, sin_yaw * cos_pitch, -sin_pitch);
+        let right = DVec3::new(sin_yaw, -cos_yaw, 0.0);
+        let up = DVec3::new(cos_yaw * sin_pitch, sin_yaw * sin_pitch, cos_pitch);
         (right, up, forward)
     }
 
@@ -317,6 +393,12 @@ fn workplane_translation(workplane: &Workplane, delta_mm: DVec2) -> DVec3 {
     workplane.u.normalize() * delta_mm.x + workplane.v.normalize() * delta_mm.y
 }
 
+fn wrap_signed(angle: f64) -> f64 {
+    let two_pi = std::f64::consts::TAU;
+    let wrapped = (angle + std::f64::consts::PI).rem_euclid(two_pi);
+    wrapped - std::f64::consts::PI
+}
+
 fn bounds_corners(min_mm: DVec3, max_mm: DVec3) -> [DVec3; 8] {
     [
         DVec3::new(min_mm.x, min_mm.y, min_mm.z),
@@ -346,9 +428,11 @@ pub fn adaptive_grid_step_mm(pixels_per_mm: f64, min_pixel_spacing: f64) -> f64 
 
 #[cfg(test)]
 mod tests {
+    use std::f64::consts::FRAC_PI_2;
+
     use glam::{dvec2, dvec3};
 
-    use super::Camera2d;
+    use super::{Camera2d, Projection};
 
     #[test]
     fn world_to_screen_and_back_round_trip_on_sketch_plane() {
@@ -380,5 +464,61 @@ mod tests {
         assert!((camera.target_mm.z - 6.0).abs() < 1e-6);
         assert!(camera.orbit_radius_mm > 0.0);
         assert!(camera.pixels_per_mm > 0.0);
+    }
+
+    #[test]
+    fn ortho_projection_preserves_apparent_size_at_target() {
+        // Top view places the target plane at z=0, so points with z=0 sit at the
+        // focal depth and persp/ortho should agree pixel-for-pixel there.
+        let mut camera = Camera2d::default();
+        camera.update_viewport(dvec2(800.0, 600.0));
+        camera.set_orientation(FRAC_PI_2, FRAC_PI_2);
+        let center = dvec2(400.0, 300.0);
+        let world_point = dvec3(7.5, -3.25, 0.0);
+
+        let persp = camera.project_point(world_point, center).unwrap();
+        camera.set_projection(Projection::Orthographic);
+        let ortho = camera.project_point(world_point, center).unwrap();
+
+        assert!((persp.x - ortho.x).abs() < 1e-3);
+        assert!((persp.y - ortho.y).abs() < 1e-3);
+    }
+
+    #[test]
+    fn top_view_orientation_matches_blender_convention() {
+        let mut camera = Camera2d::default();
+        camera.update_viewport(dvec2(800.0, 600.0));
+        camera.set_orientation(FRAC_PI_2, FRAC_PI_2);
+        let center = dvec2(400.0, 300.0);
+
+        let plus_x = camera
+            .project_point(dvec3(10.0, 0.0, 0.0), center)
+            .unwrap();
+        let plus_y = camera
+            .project_point(dvec3(0.0, 10.0, 0.0), center)
+            .unwrap();
+
+        // +X should appear to the right of center, +Y should appear above center
+        // (note: egui screen y grows downward, so "above" means smaller y).
+        assert!(plus_x.x > center.x);
+        assert!((plus_x.y - center.y).abs() < 1e-3);
+        assert!(plus_y.y < center.y);
+        assert!((plus_y.x - center.x).abs() < 1e-3);
+    }
+
+    #[test]
+    fn orbit_past_pole_does_not_break_basis() {
+        let mut camera = Camera2d::default();
+        camera.update_viewport(dvec2(800.0, 600.0));
+        // Drag MMB straight up by many pixels — should pass over the pole
+        // multiple times without producing NaN projections.
+        for _ in 0..400 {
+            camera.orbit_pixels(dvec2(0.0, -50.0));
+        }
+        let center = dvec2(400.0, 300.0);
+        let projected = camera.project_point(dvec3(5.0, 0.0, 0.0), center);
+        assert!(projected.is_some());
+        let p = projected.unwrap();
+        assert!(p.x.is_finite() && p.y.is_finite());
     }
 }

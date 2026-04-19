@@ -34,6 +34,7 @@ pub struct ShellContext<'a> {
 pub struct ShellResponse {
     pub commands: Vec<AppCommand>,
     pub fit_view_requested: bool,
+    pub fit_selection_requested: bool,
     pub quit_requested: bool,
 }
 
@@ -67,7 +68,7 @@ pub fn render_shell(
         status_bar::render_in_rect(ui, status_rect, shell, &mut response);
     }
     command_palette::render(ui.ctx(), shell, &mut response);
-    if response.fit_view_requested {
+    if response.fit_view_requested || response.fit_selection_requested {
         if let Some(rect) = viewport_rect {
             fit_active_view(shell, rect);
             ui.ctx().request_repaint();
