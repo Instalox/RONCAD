@@ -2,9 +2,10 @@
 //! The legacy `Camera2d` name remains for now to limit churn across the app.
 
 use glam::{DVec2, DVec3};
+use roncad_geometry::Workplane;
 
-const MIN_PITCH_RADIANS: f64 = 5.0_f64.to_radians();
-const MAX_PITCH_RADIANS: f64 = 85.0_f64.to_radians();
+const MIN_PITCH_RADIANS: f64 = 0.0;
+const MAX_PITCH_RADIANS: f64 = 89.5_f64.to_radians();
 const MIN_ORBIT_RADIUS_MM: f64 = 8.0;
 const MAX_ORBIT_RADIUS_MM: f64 = 100_000.0;
 const NEAR_PLANE_MM: f64 = 0.1;
@@ -19,6 +20,8 @@ pub struct Camera2d {
     orbit_radius_mm: f64,
     vertical_fov_radians: f64,
     viewport_size_px: DVec2,
+    scale_axis_u_world: DVec3,
+    scale_axis_v_world: DVec3,
 }
 
 impl Default for Camera2d {
@@ -31,6 +34,8 @@ impl Default for Camera2d {
             orbit_radius_mm: 240.0,
             vertical_fov_radians: 40.0_f64.to_radians(),
             viewport_size_px: DVec2::new(1200.0, 800.0),
+            scale_axis_u_world: DVec3::X,
+            scale_axis_v_world: DVec3::Y,
         };
         camera.refresh_pixels_per_mm();
         camera
@@ -65,6 +70,29 @@ impl Camera2d {
     pub fn screen_to_world(&self, screen: DVec2, screen_center: DVec2) -> DVec2 {
         self.screen_to_plane(screen, screen_center, 0.0)
             .unwrap_or_else(|| DVec2::new(self.target_mm.x, self.target_mm.y))
+    }
+
+    pub fn screen_to_workplane(
+        &self,
+        screen: DVec2,
+        screen_center: DVec2,
+        workplane: &Workplane,
+    ) -> Option<DVec2> {
+        let eye = self.eye_mm();
+        let ray = self.screen_ray(screen, screen_center);
+        let normal = workplane.normal();
+        let denom = ray.dot(normal);
+        if denom.abs() <= f64::EPSILON {
+            return None;
+        }
+
+        let t = (workplane.origin - eye).dot(normal) / denom;
+        if t <= 0.0 {
+            return None;
+        }
+
+        let world = eye + ray * t;
+        Some(workplane.world_to_local(world))
     }
 
     pub fn screen_to_plane(
@@ -102,6 +130,24 @@ impl Camera2d {
         self.refresh_pixels_per_mm();
     }
 
+    pub fn zoom_about_workplane(
+        &mut self,
+        screen_point: DVec2,
+        screen_center: DVec2,
+        factor: f64,
+        workplane: &Workplane,
+    ) {
+        let before = self.screen_to_workplane(screen_point, screen_center, workplane);
+        self.orbit_radius_mm =
+            (self.orbit_radius_mm / factor).clamp(MIN_ORBIT_RADIUS_MM, MAX_ORBIT_RADIUS_MM);
+        if let Some(before) = before {
+            if let Some(after) = self.screen_to_workplane(screen_point, screen_center, workplane) {
+                self.target_mm += workplane_translation(workplane, before - after);
+            }
+        }
+        self.refresh_pixels_per_mm();
+    }
+
     pub fn pan_pixels(&mut self, delta_px: DVec2, screen_center: DVec2) {
         if delta_px.length_squared() <= f64::EPSILON {
             return;
@@ -113,6 +159,24 @@ impl Camera2d {
             let delta = before - after;
             self.target_mm.x += delta.x;
             self.target_mm.y += delta.y;
+            self.refresh_pixels_per_mm();
+        }
+    }
+
+    pub fn pan_pixels_on_workplane(
+        &mut self,
+        delta_px: DVec2,
+        screen_center: DVec2,
+        workplane: &Workplane,
+    ) {
+        if delta_px.length_squared() <= f64::EPSILON {
+            return;
+        }
+
+        let before = self.screen_to_workplane(screen_center, screen_center, workplane);
+        let after = self.screen_to_workplane(screen_center + delta_px, screen_center, workplane);
+        if let (Some(before), Some(after)) = (before, after) {
+            self.target_mm += workplane_translation(workplane, before - after);
             self.refresh_pixels_per_mm();
         }
     }
@@ -158,6 +222,18 @@ impl Camera2d {
         self.refresh_pixels_per_mm();
     }
 
+    pub fn align_to_workplane(&mut self, workplane: &Workplane) {
+        let forward = -workplane.normal();
+        self.yaw_radians = forward.y.atan2(forward.x);
+        self.pitch_radians = (-forward.z)
+            .asin()
+            .clamp(MIN_PITCH_RADIANS, MAX_PITCH_RADIANS);
+        self.target_mm = workplane.origin;
+        self.scale_axis_u_world = workplane.u.normalize();
+        self.scale_axis_v_world = workplane.v.normalize();
+        self.refresh_pixels_per_mm();
+    }
+
     pub fn eye_mm(&self) -> DVec3 {
         self.target_mm - self.forward_dir() * self.orbit_radius_mm
     }
@@ -177,6 +253,10 @@ impl Camera2d {
         DVec2::new(width.max(10.0), height.max(10.0))
     }
 
+    pub fn viewport_size_px(&self) -> DVec2 {
+        self.viewport_size_px
+    }
+
     fn screen_ray(&self, screen: DVec2, screen_center: DVec2) -> DVec3 {
         let focal = self.focal_length_px();
         let (right, up, forward) = self.basis();
@@ -193,7 +273,11 @@ impl Camera2d {
             -self.pitch_radians.sin(),
         )
         .normalize();
-        let world_up = DVec3::Z;
+        let world_up = if forward.dot(DVec3::Z).abs() > 0.999 {
+            DVec3::Y
+        } else {
+            DVec3::Z
+        };
         let right = world_up.cross(forward).normalize();
         let up = forward.cross(right).normalize();
         (right, up, forward)
@@ -209,17 +293,28 @@ impl Camera2d {
 
     fn refresh_pixels_per_mm(&mut self) {
         let screen_center = self.viewport_size_px * 0.5;
-        let anchor = DVec3::new(self.target_mm.x, self.target_mm.y, 0.0);
-        let axis = anchor + DVec3::X;
+        let anchor = self.target_mm;
+        let u_axis = anchor + self.scale_axis_u_world.normalize();
+        let v_axis = anchor + self.scale_axis_v_world.normalize();
 
-        self.pixels_per_mm = match (
-            self.project_point(anchor, screen_center),
-            self.project_point(axis, screen_center),
-        ) {
-            (Some(a), Some(b)) => (b - a).length().clamp(0.05, 10_000.0),
-            _ => 1.0,
-        };
+        let anchor_screen = self.project_point(anchor, screen_center);
+        let u_px = anchor_screen
+            .zip(self.project_point(u_axis, screen_center))
+            .map(|(a, b)| (b - a).length());
+        let v_px = anchor_screen
+            .zip(self.project_point(v_axis, screen_center))
+            .map(|(a, b)| (b - a).length());
+
+        self.pixels_per_mm = u_px
+            .into_iter()
+            .chain(v_px)
+            .fold(1.0, f64::max)
+            .clamp(0.05, 10_000.0);
     }
+}
+
+fn workplane_translation(workplane: &Workplane, delta_mm: DVec2) -> DVec3 {
+    workplane.u.normalize() * delta_mm.x + workplane.v.normalize() * delta_mm.y
 }
 
 fn bounds_corners(min_mm: DVec3, max_mm: DVec3) -> [DVec3; 8] {

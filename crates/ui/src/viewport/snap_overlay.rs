@@ -2,16 +2,18 @@
 //! inference reads directly in the viewport.
 
 use egui::{Align2, Color32, FontId, Pos2, Rect, Stroke};
+use roncad_geometry::Workplane;
 use roncad_rendering::Camera2d;
 use roncad_tools::{SnapKind, SnapReference, SnapResult};
 
-use super::{screen_center, to_pos};
+use super::{project_workplane_point, screen_center};
 use crate::theme::ThemeColors;
 
 pub(super) fn paint(
     painter: &egui::Painter,
     rect: Rect,
     camera: &Camera2d,
+    workplane: Option<&Workplane>,
     snap_result: Option<&SnapResult>,
 ) {
     let Some(snap) = snap_result else {
@@ -20,12 +22,17 @@ pub(super) fn paint(
     let Some(kind) = snap.kind else {
         return;
     };
+    let Some(workplane) = workplane else {
+        return;
+    };
 
     let center = screen_center(rect);
-    let point = to_pos(camera.world_to_screen(snap.point, center));
+    let Some(point) = project_workplane_point(camera, center, workplane, snap.point) else {
+        return;
+    };
 
     for reference in snap.references.iter().flatten() {
-        paint_reference(painter, camera, center, point, *reference);
+        paint_reference(painter, camera, center, workplane, point, *reference);
     }
 
     match kind {
@@ -65,10 +72,13 @@ fn paint_reference(
     painter: &egui::Painter,
     camera: &Camera2d,
     center: glam::DVec2,
+    workplane: &Workplane,
     snap_point: Pos2,
     reference: SnapReference,
 ) {
-    let source = to_pos(camera.world_to_screen(reference.point, center));
+    let Some(source) = project_workplane_point(camera, center, workplane, reference.point) else {
+        return;
+    };
     let color = snap_color(reference.kind).gamma_multiply(0.72);
 
     if reference.axis.is_some() {

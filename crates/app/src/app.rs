@@ -4,6 +4,7 @@
 use eframe::{App, CreationContext, Frame};
 use egui::Ui;
 use roncad_core::command::AppCommand;
+use roncad_core::ids::WorkplaneId;
 use roncad_core::selection::Selection;
 use roncad_geometry::Project;
 use roncad_rendering::Camera2d;
@@ -48,6 +49,7 @@ struct UiState {
     hud_state: HudEditState,
     command_palette: CommandPaletteState,
     extrude_hud: ExtrudeHudState,
+    new_sketch_plane: Option<WorkplaneId>,
 }
 
 pub struct RonCadApp {
@@ -60,15 +62,18 @@ pub struct RonCadApp {
 impl RonCadApp {
     pub fn new(cc: &CreationContext<'_>) -> Self {
         apply_dark_theme(&cc.egui_ctx);
-        Self {
+        let mut app = Self {
             document: DocumentState::default(),
             tool: ToolRuntimeState::default(),
             render: RenderCache::default(),
             ui: UiState::default(),
-        }
+        };
+        app.align_camera_to_active_sketch();
+        app
     }
 
     fn dispatch(&mut self, commands: Vec<AppCommand>) {
+        let previous_sketch = self.document.project.active_sketch;
         for cmd in commands {
             tracing::debug!(?cmd, "apply");
             dispatcher::apply(
@@ -77,6 +82,47 @@ impl RonCadApp {
                 &cmd,
             );
         }
+        if self.document.project.active_sketch != previous_sketch {
+            self.align_camera_to_active_sketch();
+        }
+        if self.ui.new_sketch_plane.is_none() {
+            self.ui.new_sketch_plane = self
+                .document
+                .project
+                .active_sketch()
+                .map(|sketch| sketch.workplane);
+        }
+    }
+
+    fn align_camera_to_active_sketch(&mut self) {
+        let Some(sketch_id) = self.document.project.active_sketch else {
+            return;
+        };
+        let Some(sketch) = self.document.project.sketches.get(sketch_id) else {
+            return;
+        };
+        let Some(workplane) = self.document.project.workplanes.get(sketch.workplane) else {
+            return;
+        };
+
+        self.render.camera.align_to_workplane(workplane);
+        self.ui.new_sketch_plane = Some(sketch.workplane);
+
+        let (min, max) = if let Some((local_min, local_max)) = sketch.bounds() {
+            workplane.local_bounds_to_world_bounds(
+                glam::DVec3::new(local_min.x, local_min.y, 0.0),
+                glam::DVec3::new(local_max.x, local_max.y, 0.0),
+            )
+        } else {
+            workplane.local_bounds_to_world_bounds(
+                glam::DVec3::new(-40.0, -40.0, 0.0),
+                glam::DVec3::new(40.0, 40.0, 0.0),
+            )
+        };
+
+        self.render
+            .camera
+            .fit_bounds_3d(self.render.camera.viewport_size_px(), min, max, 56.0);
     }
 }
 
@@ -93,6 +139,7 @@ impl App for RonCadApp {
             hud_state: &mut self.ui.hud_state,
             command_palette: &mut self.ui.command_palette,
             extrude_hud: &mut self.ui.extrude_hud,
+            new_sketch_plane: &mut self.ui.new_sketch_plane,
         };
 
         let response = render_shell(

@@ -3,6 +3,7 @@
 
 use egui::{pos2, Rect, Sense, Ui};
 use roncad_core::command::AppCommand;
+use roncad_core::ids::WorkplaneId;
 use roncad_core::selection::Selection;
 use roncad_geometry::Project;
 use roncad_rendering::Camera2d;
@@ -26,6 +27,7 @@ pub struct ShellContext<'a> {
     pub hud_state: &'a mut HudEditState,
     pub command_palette: &'a mut CommandPaletteState,
     pub extrude_hud: &'a mut ExtrudeHudState,
+    pub new_sketch_plane: &'a mut Option<WorkplaneId>,
 }
 
 #[derive(Default)]
@@ -102,17 +104,24 @@ fn fit_bounds(project: &Project) -> Option<(glam::DVec3, glam::DVec3)> {
 
     if let Some(sketch) = project.active_sketch() {
         if let Some((sketch_min, sketch_max)) = sketch.bounds() {
-            min = min.min(glam::DVec3::new(sketch_min.x, sketch_min.y, 0.0));
-            max = max.max(glam::DVec3::new(sketch_max.x, sketch_max.y, 0.0));
-            found = true;
+            if let Some(workplane) = project.active_workplane() {
+                let (world_min, world_max) = workplane.local_bounds_to_world_bounds(
+                    glam::DVec3::new(sketch_min.x, sketch_min.y, 0.0),
+                    glam::DVec3::new(sketch_max.x, sketch_max.y, 0.0),
+                );
+                min = min.min(world_min);
+                max = max.max(world_max);
+                found = true;
+            }
         }
     }
 
     for (_, feature) in project.features.iter() {
-        let (feature_min, feature_max) = feature.bounds_3d();
-        min = min.min(feature_min);
-        max = max.max(feature_max);
-        found = true;
+        if let Some((feature_min, feature_max)) = project.feature_world_bounds(feature) {
+            min = min.min(feature_min);
+            max = max.max(feature_max);
+            found = true;
+        }
     }
 
     found.then_some((min, max))

@@ -5,7 +5,7 @@
 use glam::DVec2;
 use serde::{Deserialize, Serialize};
 
-use crate::ids::{BodyId, SketchEntityId, SketchId};
+use crate::ids::{BodyId, SketchEntityId, SketchId, WorkplaneId};
 use crate::units::LengthMm;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -18,6 +18,7 @@ pub enum ProfileRegion {
 pub enum AppCommand {
     CreateSketch {
         name: String,
+        plane: WorkplaneId,
     },
     SetActiveSketch(SketchId),
     DeleteSketch(SketchId),

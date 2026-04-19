@@ -14,7 +14,7 @@ use roncad_core::selection::{Selection, SelectionItem};
 use roncad_core::units::LengthMm;
 use roncad_geometry::{arc_mid_point, SketchEntity};
 
-use super::{screen_center, to_pos};
+use super::{project_workplane_point, screen_center};
 use crate::hud_state::HudEditState;
 use crate::shell::{ShellContext, ShellResponse};
 use crate::theme::ThemeColors;
@@ -55,12 +55,21 @@ pub(super) fn paint(
     ensure_buffers(shell.hud_state, &selected, &fields);
 
     let anchor_world = anchor_world(&entity);
+    let Some(workplane) = shell.project.sketch_workplane(sketch_id) else {
+        shell.hud_state.clear();
+        return;
+    };
     let center = screen_center(rect);
-    let anchor_screen = to_pos(shell.camera.world_to_screen(anchor_world, center));
+    let Some(anchor_screen) =
+        project_workplane_point(shell.camera, center, workplane, anchor_world)
+    else {
+        shell.hud_state.clear();
+        return;
+    };
     let cursor_screen = shell
         .cursor_world_mm
         .as_ref()
-        .map(|cursor| to_pos(shell.camera.world_to_screen(*cursor, center)));
+        .and_then(|cursor| project_workplane_point(shell.camera, center, workplane, *cursor));
     let hud_pos = mini_hud_pos(anchor_screen, cursor_screen, rect, fields.len());
 
     let snap_label = shell

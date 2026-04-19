@@ -14,9 +14,10 @@ const TREE_INDENT: f32 = 16.0;
 
 pub fn render_browser_section(ui: &mut Ui, shell: &ShellContext<'_>, response: &mut ShellResponse) {
     ui.spacing_mut().item_spacing = egui::vec2(0.0, 2.0);
+    let active_plane = shell.project.active_sketch().map(|sketch| sketch.workplane);
 
     tree_group(ui, "Origin");
-    for (_, plane) in shell.project.workplanes.iter() {
+    for (plane_id, plane) in shell.project.workplanes.iter() {
         ui.push_id(("workplane_row", plane.name.as_str()), |ui| {
             let _ = tree_row(
                 ui,
@@ -25,7 +26,7 @@ pub fn render_browser_section(ui: &mut Ui, shell: &ShellContext<'_>, response: &
                     glyph: ph::SQUARE,
                     label: format!("{} plane", plane.name),
                     count: None,
-                    selected: false,
+                    selected: active_plane == Some(plane_id),
                     muted: false,
                 },
             );
@@ -58,7 +59,16 @@ pub fn render_browser_section(ui: &mut Ui, shell: &ShellContext<'_>, response: &
                         depth: 1,
                         glyph: ph::DISC,
                         label: sketch.name.clone(),
-                        count: Some(entity_summary(sketch.entities.len())),
+                        count: Some(format!(
+                            "{} · {}",
+                            shell
+                                .project
+                                .workplanes
+                                .get(sketch.workplane)
+                                .map(|plane| plane.name.as_str())
+                                .unwrap_or("?"),
+                            entity_summary(sketch.entities.len())
+                        )),
                         selected: active,
                         muted: false,
                     },

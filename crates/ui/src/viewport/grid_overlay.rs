@@ -1,8 +1,9 @@
 use egui::{Color32, Pos2, Rect, Stroke};
 use glam::DVec2;
+use roncad_geometry::Project;
 use roncad_rendering::Camera2d;
 
-use super::{pick_step, screen_center};
+use super::{active_workplane, pick_step, screen_center};
 use crate::theme::ThemeColors;
 
 const DOT_GRID_TARGET_SPACING_PX: f64 = 12.0;
@@ -13,12 +14,17 @@ const MAJOR_DOT_FULL_SPACING_PX: f64 = 26.0;
 const MINOR_DOT_RADIUS: f32 = 0.85;
 const MAJOR_DOT_RADIUS: f32 = 1.4;
 
-pub(super) fn paint(painter: &egui::Painter, rect: Rect, camera: &Camera2d) {
+pub(super) fn paint(painter: &egui::Painter, rect: Rect, camera: &Camera2d, project: &Project) {
     painter.rect_filled(rect, 0.0, ThemeColors::BG_DEEP);
 
     let center = screen_center(rect);
     let ppm = camera.pixels_per_mm;
-    let focus = camera.plane_focus_mm();
+    let Some(workplane) = active_workplane(project) else {
+        return;
+    };
+    let focus = camera
+        .screen_to_workplane(center, center, workplane)
+        .unwrap_or(DVec2::ZERO);
     let span = camera.plane_half_extents_mm();
 
     let minor_step_mm = pick_step(ppm, DOT_GRID_TARGET_SPACING_PX);
@@ -29,6 +35,7 @@ pub(super) fn paint(painter: &egui::Painter, rect: Rect, camera: &Camera2d) {
         rect,
         center,
         camera,
+        workplane,
         focus,
         span,
         minor_step_mm,
@@ -42,6 +49,7 @@ pub(super) fn paint(painter: &egui::Painter, rect: Rect, camera: &Camera2d) {
         rect,
         center,
         camera,
+        workplane,
         focus,
         span,
         major_step_mm,
@@ -51,7 +59,7 @@ pub(super) fn paint(painter: &egui::Painter, rect: Rect, camera: &Camera2d) {
         MAJOR_DOT_FULL_SPACING_PX,
     );
 
-    paint_axes(painter, rect, center, camera, focus, span);
+    paint_axes(painter, rect, center, camera, workplane, focus, span);
 }
 
 fn paint_dots(
@@ -59,6 +67,7 @@ fn paint_dots(
     rect: Rect,
     center: DVec2,
     camera: &Camera2d,
+    workplane: &roncad_geometry::Workplane,
     focus: DVec2,
     span: DVec2,
     step_mm: f64,
@@ -86,7 +95,7 @@ fn paint_dots(
     while x <= x_end {
         let mut y = y_start;
         while y <= y_end {
-            if let Some(p) = camera.project_point(glam::DVec3::new(x, y, 0.0), center) {
+            if let Some(p) = camera.project_point(workplane.local_point(DVec2::new(x, y)), center) {
                 let pos = Pos2::new(p.x as f32, p.y as f32);
                 if rect.contains(pos) {
                     painter.circle_filled(pos, radius, color);
@@ -103,6 +112,7 @@ fn paint_axes(
     rect: Rect,
     center: DVec2,
     camera: &Camera2d,
+    workplane: &roncad_geometry::Workplane,
     focus: DVec2,
     span: DVec2,
 ) {
@@ -112,6 +122,7 @@ fn paint_axes(
             rect,
             camera,
             center,
+            workplane,
             DVec2::new(-span.x, 0.0),
             DVec2::new(span.x, 0.0),
             ThemeColors::GRID_AXIS_X,
@@ -123,6 +134,7 @@ fn paint_axes(
             rect,
             camera,
             center,
+            workplane,
             DVec2::new(0.0, -span.y),
             DVec2::new(0.0, span.y),
             ThemeColors::GRID_AXIS_Y,
@@ -135,13 +147,14 @@ fn paint_axis_segment(
     rect: Rect,
     camera: &Camera2d,
     center: DVec2,
+    workplane: &roncad_geometry::Workplane,
     start: DVec2,
     end: DVec2,
     color: Color32,
 ) {
     let (Some(start), Some(end)) = (
-        camera.project_point(glam::DVec3::new(start.x, start.y, 0.0), center),
-        camera.project_point(glam::DVec3::new(end.x, end.y, 0.0), center),
+        camera.project_point(workplane.local_point(start), center),
+        camera.project_point(workplane.local_point(end), center),
     ) else {
         return;
     };

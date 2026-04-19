@@ -29,9 +29,13 @@ pub fn handle_viewport_interaction(
     }
     let active_kind = shell.tool_manager.active_kind();
 
-    let raw_cursor_world = resp
-        .hover_pos()
-        .map(|pointer| shell.camera.screen_to_world(pos_to_dvec(pointer), center));
+    let raw_cursor_world = resp.hover_pos().and_then(|pointer| {
+        active_workplane(shell).and_then(|plane| {
+            shell
+                .camera
+                .screen_to_workplane(pos_to_dvec(pointer), center, plane)
+        })
+    });
 
     let modifiers = ui.ctx().input(|input| Modifiers {
         shift: input.modifiers.shift,
@@ -66,7 +70,13 @@ pub fn handle_viewport_interaction(
         }
     } else if resp.clicked_by(PointerButton::Primary) {
         if let Some(pointer) = resp.interact_pointer_pos() {
-            let raw_world = shell.camera.screen_to_world(pos_to_dvec(pointer), center);
+            let Some(raw_world) = active_workplane(shell).and_then(|plane| {
+                shell
+                    .camera
+                    .screen_to_workplane(pos_to_dvec(pointer), center, plane)
+            }) else {
+                return ViewportInteractionState { hovered_target };
+            };
             let world = active_snap_result(raw_world, active_kind, shell.snap_engine, &ctx)
                 .map_or(raw_world, |snap| snap.point);
             let commands = shell.tool_manager.on_pointer_click(&ctx, world);
@@ -78,7 +88,13 @@ pub fn handle_viewport_interaction(
         shell.extrude_hud.clear();
     } else if resp.clicked_by(PointerButton::Secondary) {
         if let Some(pointer) = resp.interact_pointer_pos() {
-            let raw_world = shell.camera.screen_to_world(pos_to_dvec(pointer), center);
+            let Some(raw_world) = active_workplane(shell).and_then(|plane| {
+                shell
+                    .camera
+                    .screen_to_workplane(pos_to_dvec(pointer), center, plane)
+            }) else {
+                return ViewportInteractionState { hovered_target };
+            };
             let world = active_snap_result(raw_world, active_kind, shell.snap_engine, &ctx)
                 .map_or(raw_world, |snap| snap.point);
             let commands = shell.tool_manager.on_pointer_secondary_click(&ctx, world);
@@ -108,7 +124,13 @@ pub fn handle_viewport_interaction(
     if resp.dragged_by(PointerButton::Middle) {
         shell.camera.orbit_pixels(pointer_delta);
     } else if resp.dragged_by(PointerButton::Secondary) {
-        shell.camera.pan_pixels(pointer_delta, center);
+        if let Some(workplane) = active_workplane(shell).cloned() {
+            shell
+                .camera
+                .pan_pixels_on_workplane(pointer_delta, center, &workplane);
+        } else {
+            shell.camera.pan_pixels(pointer_delta, center);
+        }
     }
 
     if resp.hovered() {
@@ -116,9 +138,18 @@ pub fn handle_viewport_interaction(
         if scroll.abs() > f32::EPSILON {
             if let Some(pointer) = resp.hover_pos() {
                 let factor = (scroll as f64 * 0.0025).exp();
-                shell
-                    .camera
-                    .zoom_about(pos_to_dvec(pointer), center, factor);
+                if let Some(workplane) = active_workplane(shell).cloned() {
+                    shell.camera.zoom_about_workplane(
+                        pos_to_dvec(pointer),
+                        center,
+                        factor,
+                        &workplane,
+                    );
+                } else {
+                    shell
+                        .camera
+                        .zoom_about(pos_to_dvec(pointer), center, factor);
+                }
             }
         }
     }
@@ -283,4 +314,8 @@ fn screen_center(rect: Rect) -> DVec2 {
 
 fn pos_to_dvec(pos: Pos2) -> DVec2 {
     DVec2::new(pos.x as f64, pos.y as f64)
+}
+
+fn active_workplane<'a>(shell: &'a ShellContext<'_>) -> Option<&'a roncad_geometry::Workplane> {
+    shell.project.active_workplane()
 }

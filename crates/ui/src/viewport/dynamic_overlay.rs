@@ -6,7 +6,7 @@
 use egui::{Area, Color32, Frame, Id, Margin, Order, Pos2, Rect, Stroke, Ui, Vec2};
 use roncad_tools::{DynamicFieldView, DynamicFieldVisualState};
 
-use super::{screen_center, to_pos};
+use super::{project_workplane_point, screen_center};
 use crate::shell::ShellContext;
 use crate::theme::ThemeColors;
 
@@ -31,8 +31,15 @@ pub(super) fn paint(ui: &mut Ui, rect: Rect, shell: &ShellContext<'_>) {
     let Some(cursor_world) = *shell.cursor_world_mm else {
         return;
     };
+    let Some(workplane) = shell.project.active_workplane() else {
+        return;
+    };
     let center = screen_center(rect);
-    let cursor_screen = to_pos(shell.camera.world_to_screen(cursor_world, center));
+    let Some(cursor_screen) =
+        project_workplane_point(shell.camera, center, workplane, cursor_world)
+    else {
+        return;
+    };
     let hud_size = fitted_dynamic_hud_size(dynamic_hud_size(&views), rect);
     let hud_pos = dynamic_hud_pos(cursor_screen, rect, hud_size);
 

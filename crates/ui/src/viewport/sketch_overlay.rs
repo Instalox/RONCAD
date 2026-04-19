@@ -3,7 +3,7 @@ use roncad_core::selection::{Selection, SelectionItem};
 use roncad_geometry::{arc_sample_points, HoverTarget, Project, SketchEntity};
 use roncad_rendering::Camera2d;
 
-use super::{screen_center, to_pos, tool_overlay, COLOR_SKETCH};
+use super::{project_workplane_point, screen_center, tool_overlay, COLOR_SKETCH};
 use crate::theme::ThemeColors;
 
 const COLOR_HOVER: Color32 = Color32::from_rgb(0xF5, 0xC2, 0x52);
@@ -20,6 +20,9 @@ pub(super) fn paint(
         return;
     };
     let Some(sketch) = project.active_sketch() else {
+        return;
+    };
+    let Some(workplane) = project.active_workplane() else {
         return;
     };
     let center = screen_center(rect);
@@ -61,21 +64,35 @@ pub(super) fn paint(
         let vertex = Stroke::new(vertex_width, color);
         match entity {
             SketchEntity::Point { p } => {
-                let s = to_pos(camera.world_to_screen(*p, center));
-                painter.circle_stroke(s, point_radius, vertex);
+                if let Some(s) = project_workplane_point(camera, center, workplane, *p) {
+                    painter.circle_stroke(s, point_radius, vertex);
+                }
             }
             SketchEntity::Line { a, b } => {
-                let sa = to_pos(camera.world_to_screen(*a, center));
-                let sb = to_pos(camera.world_to_screen(*b, center));
-                painter.line_segment([sa, sb], stroke);
+                if let (Some(sa), Some(sb)) = (
+                    project_workplane_point(camera, center, workplane, *a),
+                    project_workplane_point(camera, center, workplane, *b),
+                ) {
+                    painter.line_segment([sa, sb], stroke);
+                }
             }
             SketchEntity::Rectangle { corner_a, corner_b } => {
-                tool_overlay::paint_rect(painter, camera, center, *corner_a, *corner_b, stroke);
+                tool_overlay::paint_rect(
+                    painter, camera, center, workplane, *corner_a, *corner_b, stroke,
+                );
             }
             SketchEntity::Circle { center: c, radius } => {
-                let sc = to_pos(camera.world_to_screen(*c, center));
-                let r_px = (*radius * camera.pixels_per_mm) as f32;
-                painter.circle_stroke(sc, r_px, stroke);
+                let points: Vec<_> = arc_sample_points(
+                    *c,
+                    *radius,
+                    0.0,
+                    std::f64::consts::TAU,
+                    std::f64::consts::PI / 32.0,
+                )
+                .into_iter()
+                .filter_map(|point| project_workplane_point(camera, center, workplane, point))
+                .collect();
+                painter.add(egui::Shape::closed_line(points, stroke));
             }
             SketchEntity::Arc {
                 center: c,
@@ -91,7 +108,7 @@ pub(super) fn paint(
                     std::f64::consts::PI / 48.0,
                 )
                 .into_iter()
-                .map(|point| to_pos(camera.world_to_screen(point, center)))
+                .filter_map(|point| project_workplane_point(camera, center, workplane, point))
                 .collect();
                 painter.add(egui::Shape::line(points, stroke));
             }

@@ -7,6 +7,7 @@ use egui::{
 };
 use egui_phosphor::regular as ph;
 use roncad_core::command::AppCommand;
+use roncad_core::ids::WorkplaneId;
 
 use crate::shell::{ShellContext, ShellResponse};
 use crate::theme::ThemeColors;
@@ -35,9 +36,14 @@ pub fn render(ui: &mut Ui, shell: &mut ShellContext<'_>, response: &mut ShellRes
                     toolbar_divider(ui);
 
                     sketch_selector(ui, shell, response);
+                    new_sketch_plane_selector(ui, shell);
                     if icon_button(ui, ph::PLUS, "Create sketch").clicked() {
+                        let plane = preferred_sketch_plane(shell).unwrap_or_else(|| {
+                            shell.project.workplanes.keys().next().expect("plane")
+                        });
                         response.commands.push(AppCommand::CreateSketch {
                             name: format!("Sketch {}", shell.project.sketches.len() + 1),
+                            plane,
                         });
                     }
 
@@ -99,23 +105,69 @@ fn brand(ui: &mut Ui, color: egui::Color32) {
 }
 
 fn sketch_selector(ui: &mut Ui, shell: &ShellContext<'_>, response: &mut ShellResponse) {
-    let selected = shell
-        .project
-        .active_sketch()
-        .map_or_else(|| "No Sketch".to_string(), |sketch| sketch.name.clone());
+    let selected = shell.project.active_sketch().map_or_else(
+        || "No Sketch".to_string(),
+        |sketch| {
+            let plane = shell
+                .project
+                .workplanes
+                .get(sketch.workplane)
+                .map(|plane| plane.name.as_str())
+                .unwrap_or("?");
+            format!("{} · {}", sketch.name, plane)
+        },
+    );
 
     ComboBox::from_id_salt("active_sketch_selector")
-        .width(140.0)
+        .width(172.0)
         .selected_text(RichText::new(selected).size(12.0))
         .show_ui(ui, |ui| {
             for (id, sketch) in shell.project.sketches.iter() {
                 let selected = shell.project.active_sketch == Some(id);
-                if ui.selectable_label(selected, &sketch.name).clicked() && !selected {
+                let plane = shell
+                    .project
+                    .workplanes
+                    .get(sketch.workplane)
+                    .map(|plane| plane.name.as_str())
+                    .unwrap_or("?");
+                let label = format!("{} · {}", sketch.name, plane);
+                if ui.selectable_label(selected, label).clicked() && !selected {
                     response.commands.push(AppCommand::SetActiveSketch(id));
                     ui.close();
                 }
             }
         });
+}
+
+fn new_sketch_plane_selector(ui: &mut Ui, shell: &mut ShellContext<'_>) {
+    let Some(selected_plane) = preferred_sketch_plane(shell) else {
+        return;
+    };
+    let selected_label = shell
+        .project
+        .workplanes
+        .get(selected_plane)
+        .map(|plane| plane.name.as_str())
+        .unwrap_or("Plane");
+
+    ComboBox::from_id_salt("new_sketch_plane_selector")
+        .width(72.0)
+        .selected_text(RichText::new(selected_label).size(12.0))
+        .show_ui(ui, |ui| {
+            for (id, plane) in shell.project.workplanes.iter() {
+                let selected = selected_plane == id;
+                if ui.selectable_label(selected, &plane.name).clicked() && !selected {
+                    *shell.new_sketch_plane = Some(id);
+                    ui.close();
+                }
+            }
+        });
+}
+
+fn preferred_sketch_plane(shell: &ShellContext<'_>) -> Option<WorkplaneId> {
+    (*shell.new_sketch_plane)
+        .or(shell.project.active_sketch().map(|sketch| sketch.workplane))
+        .or_else(|| shell.project.workplanes.keys().next())
 }
 
 fn icon_button(ui: &mut Ui, icon: &str, hover_text: &str) -> egui::Response {

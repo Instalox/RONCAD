@@ -27,18 +27,29 @@ pub(super) fn paint(
         let palette = BodyPalette::for_selection(selected);
 
         for (_, feature) in project.body_features(body_id) {
+            let Some(workplane) = feature
+                .source_sketch()
+                .and_then(|sketch_id| project.sketch_workplane(sketch_id))
+                .or_else(|| project.workplanes.iter().next().map(|(_, plane)| plane))
+            else {
+                continue;
+            };
             let mesh = extrude_mesh(feature.profile(), feature.distance_mm());
 
             for triangle in mesh.triangles {
-                let centroid =
-                    (triangle.positions[0] + triangle.positions[1] + triangle.positions[2]) / 3.0;
-                if triangle.normal.dot(eye - centroid) <= 0.0 {
+                let positions = triangle
+                    .positions
+                    .map(|position| workplane.local_position(position));
+                let centroid = (positions[0] + positions[1] + positions[2]) / 3.0;
+                let normal = workplane.local_position(triangle.normal)
+                    - workplane.local_position(DVec3::ZERO);
+                if normal.dot(eye - centroid) <= 0.0 {
                     continue;
                 }
 
                 let mut projected = [Pos2::ZERO; 3];
                 let mut skip = false;
-                for (index, position) in triangle.positions.iter().enumerate() {
+                for (index, position) in positions.iter().enumerate() {
                     let Some(screen) = camera.project_point(*position, center) else {
                         skip = true;
                         break;
@@ -52,10 +63,10 @@ pub(super) fn paint(
                 let depth = triangle
                     .positions
                     .iter()
-                    .map(|position| camera.view_depth(*position))
+                    .map(|position| camera.view_depth(workplane.local_position(*position)))
                     .sum::<f64>()
                     / 3.0;
-                let intensity = (0.22 + 0.78 * triangle.normal.dot(light).max(0.0)) as f32;
+                let intensity = (0.22 + 0.78 * normal.normalize().dot(light).max(0.0)) as f32;
                 faces.push(ScreenFace {
                     points: projected,
                     depth,
@@ -64,6 +75,8 @@ pub(super) fn paint(
             }
 
             for (start, end) in mesh.outline_edges {
+                let start = workplane.local_position(start);
+                let end = workplane.local_position(end);
                 let (Some(start_screen), Some(end_screen)) = (
                     camera.project_point(start, center),
                     camera.project_point(end, center),

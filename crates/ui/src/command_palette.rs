@@ -167,20 +167,23 @@ fn build_catalog(shell: &ShellContext<'_>) -> Vec<PaletteItem> {
         });
     }
 
-    items.push(PaletteItem {
-        group: "Project",
-        icon: ph::PLUS,
-        label: "Create sketch".to_string(),
-        detail: Some(format!(
-            "Sketch {}",
-            shell.project.sketches.len().saturating_add(1)
-        )),
-        shortcut: None,
-        search_text: "new sketch create project".to_string(),
-        action: PaletteAction::Command(AppCommand::CreateSketch {
-            name: format!("Sketch {}", shell.project.sketches.len() + 1),
-        }),
-    });
+    for (plane_id, plane) in shell.project.workplanes.iter() {
+        items.push(PaletteItem {
+            group: "Project",
+            icon: ph::PLUS,
+            label: format!("Create sketch on {}", plane.name),
+            detail: Some(format!(
+                "Sketch {}",
+                shell.project.sketches.len().saturating_add(1)
+            )),
+            shortcut: None,
+            search_text: format!("new sketch create project {} plane", plane.name),
+            action: PaletteAction::Command(AppCommand::CreateSketch {
+                name: format!("Sketch {}", shell.project.sketches.len() + 1),
+                plane: plane_id,
+            }),
+        });
+    }
 
     if let Some(sketch) = shell.project.active_sketch() {
         items.push(PaletteItem {

@@ -16,7 +16,7 @@ mod tool_overlay;
 
 use egui::{Color32, Frame, Pos2, Rect, Sense, Ui, UiBuilder};
 use glam::DVec2;
-use roncad_geometry::HoverTarget;
+use roncad_geometry::{HoverTarget, Project, Workplane};
 
 use crate::shell::{ShellContext, ShellResponse};
 use crate::theme::ThemeColors;
@@ -61,7 +61,7 @@ pub fn render_in_rect(
                 .update_viewport(DVec2::new(rect.width() as f64, rect.height() as f64));
 
             let interaction = handle_interaction(ui, &resp, rect, shell, response);
-            grid_overlay::paint(ui.painter(), rect, shell.camera);
+            grid_overlay::paint(ui.painter(), rect, shell.camera, shell.project);
             body_overlay::paint(
                 ui.painter(),
                 rect,
@@ -88,14 +88,27 @@ pub fn render_in_rect(
                 ui.painter(),
                 rect,
                 shell.camera,
+                shell.project.active_workplane(),
                 interaction
                     .hovered_target
                     .as_ref()
                     .and_then(HoverTarget::as_profile),
                 shell.extrude_hud.active_profile(),
             );
-            snap_overlay::paint(ui.painter(), rect, shell.camera, shell.snap_result.as_ref());
-            tool_overlay::paint_preview(ui.painter(), rect, shell.camera, shell.tool_manager);
+            snap_overlay::paint(
+                ui.painter(),
+                rect,
+                shell.camera,
+                shell.project.active_workplane(),
+                shell.snap_result.as_ref(),
+            );
+            tool_overlay::paint_preview(
+                ui.painter(),
+                rect,
+                shell.camera,
+                shell.project.active_workplane(),
+                shell.tool_manager,
+            );
             hud_overlay::paint(ui, rect, shell, interaction.hovered_target.as_ref());
             mini_hud::paint(ui, rect, shell, response);
             dynamic_overlay::paint(ui, rect, shell);
@@ -124,4 +137,19 @@ pub(super) fn screen_center(rect: Rect) -> DVec2 {
 
 pub(super) fn to_pos(v: DVec2) -> Pos2 {
     Pos2::new(v.x as f32, v.y as f32)
+}
+
+pub(super) fn active_workplane<'a>(project: &'a Project) -> Option<&'a Workplane> {
+    project.active_workplane()
+}
+
+pub(super) fn project_workplane_point(
+    camera: &roncad_rendering::Camera2d,
+    center: DVec2,
+    workplane: &Workplane,
+    point: DVec2,
+) -> Option<Pos2> {
+    camera
+        .project_point(workplane.local_point(point), center)
+        .map(to_pos)
 }

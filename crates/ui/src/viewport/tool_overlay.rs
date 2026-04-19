@@ -2,27 +2,37 @@ use std::f64::consts::PI;
 
 use egui::{Align2, FontId, Pos2, Rect, Stroke};
 use glam::DVec2;
-use roncad_geometry::{arc_end_point, arc_mid_point, arc_sample_points, arc_start_point};
+use roncad_geometry::{
+    arc_end_point, arc_mid_point, arc_sample_points, arc_start_point, Workplane,
+};
 use roncad_rendering::Camera2d;
 use roncad_tools::{ToolManager, ToolPreview};
 
-use super::{screen_center, to_pos};
+use super::{project_workplane_point, screen_center};
 use crate::theme::ThemeColors;
 
 pub(super) fn paint_preview(
     painter: &egui::Painter,
     rect: Rect,
     camera: &Camera2d,
+    workplane: Option<&Workplane>,
     manager: &ToolManager,
 ) {
+    let Some(workplane) = workplane else {
+        return;
+    };
     let center = screen_center(rect);
     let preview_color = ThemeColors::tool_accent(manager.active_kind());
     let stroke = Stroke::new(1.4, preview_color);
     match manager.preview() {
         ToolPreview::None => {}
         ToolPreview::Line { start, end } => {
-            let sa = to_pos(camera.world_to_screen(start, center));
-            let sb = to_pos(camera.world_to_screen(end, center));
+            let (Some(sa), Some(sb)) = (
+                project_workplane_point(camera, center, workplane, start),
+                project_workplane_point(camera, center, workplane, end),
+            ) else {
+                return;
+            };
             painter.line_segment([sa, sb], stroke);
             paint_point_marker(painter, sa, stroke);
             paint_point_marker(painter, sb, stroke);
@@ -36,13 +46,27 @@ pub(super) fn paint_preview(
             );
         }
         ToolPreview::Rectangle { corner_a, corner_b } => {
-            paint_rect(painter, camera, center, corner_a, corner_b, stroke);
+            paint_rect(
+                painter, camera, center, workplane, corner_a, corner_b, stroke,
+            );
             let min = corner_a.min(corner_b);
             let max = corner_a.max(corner_b);
-            let top_mid =
-                to_pos(camera.world_to_screen(DVec2::new((min.x + max.x) * 0.5, max.y), center));
-            let right_mid =
-                to_pos(camera.world_to_screen(DVec2::new(max.x, (min.y + max.y) * 0.5), center));
+            let (Some(top_mid), Some(right_mid)) = (
+                project_workplane_point(
+                    camera,
+                    center,
+                    workplane,
+                    DVec2::new((min.x + max.x) * 0.5, max.y),
+                ),
+                project_workplane_point(
+                    camera,
+                    center,
+                    workplane,
+                    DVec2::new(max.x, (min.y + max.y) * 0.5),
+                ),
+            ) else {
+                return;
+            };
             paint_label(
                 painter,
                 top_mid,
@@ -59,14 +83,25 @@ pub(super) fn paint_preview(
             );
         }
         ToolPreview::Circle { center: c, radius } => {
-            let sc = to_pos(camera.world_to_screen(c, center));
-            let r_px = (radius * camera.pixels_per_mm) as f32;
-            painter.circle_stroke(sc, r_px, stroke);
-            painter.line_segment([sc, Pos2::new(sc.x + r_px, sc.y)], stroke);
+            let points: Vec<_> =
+                arc_sample_points(c, radius, 0.0, std::f64::consts::TAU, PI / 32.0)
+                    .into_iter()
+                    .filter_map(|point| project_workplane_point(camera, center, workplane, point))
+                    .collect();
+            let Some(rim_pos) =
+                project_workplane_point(camera, center, workplane, c + DVec2::X * radius)
+            else {
+                return;
+            };
+            let Some(sc) = project_workplane_point(camera, center, workplane, c) else {
+                return;
+            };
+            paint_polyline(painter, &points, stroke);
+            painter.line_segment([sc, rim_pos], stroke);
             paint_point_marker(painter, sc, stroke);
             paint_label(
                 painter,
-                Pos2::new(sc.x + r_px, sc.y),
+                rim_pos,
                 Align2::LEFT_CENTER,
                 &format!(
                     "R {} mm\nD {} mm",
@@ -81,8 +116,12 @@ pub(super) fn paint_preview(
             radius,
             rim,
         } => {
-            let center_pos = to_pos(camera.world_to_screen(arc_center, center));
-            let rim_pos = to_pos(camera.world_to_screen(rim, center));
+            let (Some(center_pos), Some(rim_pos)) = (
+                project_workplane_point(camera, center, workplane, arc_center),
+                project_workplane_point(camera, center, workplane, rim),
+            ) else {
+                return;
+            };
             painter.line_segment([center_pos, rim_pos], stroke);
             paint_point_marker(painter, center_pos, stroke);
             paint_point_marker(painter, rim_pos, stroke);
@@ -104,6 +143,7 @@ pub(super) fn paint_preview(
                 painter,
                 camera,
                 center,
+                workplane,
                 arc_center,
                 radius,
                 start_angle,
@@ -111,9 +151,13 @@ pub(super) fn paint_preview(
                 stroke,
             );
 
-            let center_pos = to_pos(camera.world_to_screen(arc_center, center));
             let mid_world = arc_mid_point(arc_center, radius, start_angle, sweep_angle);
-            let mid_pos = to_pos(camera.world_to_screen(mid_world, center));
+            let (Some(center_pos), Some(mid_pos)) = (
+                project_workplane_point(camera, center, workplane, arc_center),
+                project_workplane_point(camera, center, workplane, mid_world),
+            ) else {
+                return;
+            };
             let (anchor, align) = line_label_placement(center_pos, mid_pos);
             paint_label(
                 painter,
@@ -143,6 +187,7 @@ pub(super) fn paint_preview(
                 painter,
                 camera,
                 center,
+                workplane,
                 trim_a,
                 trim_b,
                 arc_center,
@@ -152,7 +197,10 @@ pub(super) fn paint_preview(
                 hover_stroke,
             );
 
-            let corner_pos = to_pos(camera.world_to_screen(corner, center));
+            let Some(corner_pos) = project_workplane_point(camera, center, workplane, corner)
+            else {
+                return;
+            };
             painter.circle_stroke(corner_pos, 7.0, Stroke::new(1.3, hover_color));
             painter.circle_filled(corner_pos, 2.0, hover_color);
             paint_label(
@@ -175,6 +223,7 @@ pub(super) fn paint_preview(
                 painter,
                 camera,
                 center,
+                workplane,
                 trim_a,
                 trim_b,
                 arc_center,
@@ -184,9 +233,13 @@ pub(super) fn paint_preview(
                 stroke,
             );
 
-            let center_pos = to_pos(camera.world_to_screen(arc_center, center));
             let mid_world = arc_mid_point(arc_center, radius, start_angle, sweep_angle);
-            let mid_pos = to_pos(camera.world_to_screen(mid_world, center));
+            let (Some(center_pos), Some(mid_pos)) = (
+                project_workplane_point(camera, center, workplane, arc_center),
+                project_workplane_point(camera, center, workplane, mid_world),
+            ) else {
+                return;
+            };
             let (anchor, align) = line_label_placement(center_pos, mid_pos);
             paint_label(
                 painter,
@@ -197,8 +250,12 @@ pub(super) fn paint_preview(
             );
         }
         ToolPreview::Measurement { start, end } => {
-            let sa = to_pos(camera.world_to_screen(start, center));
-            let sb = to_pos(camera.world_to_screen(end, center));
+            let (Some(sa), Some(sb)) = (
+                project_workplane_point(camera, center, workplane, start),
+                project_workplane_point(camera, center, workplane, end),
+            ) else {
+                return;
+            };
             painter.line_segment([sa, sb], stroke);
             paint_point_marker(painter, sa, stroke);
             paint_point_marker(painter, sb, stroke);
@@ -218,6 +275,7 @@ fn paint_arc_geometry(
     painter: &egui::Painter,
     camera: &Camera2d,
     center: DVec2,
+    workplane: &Workplane,
     arc_center: DVec2,
     radius: f64,
     start_angle: f64,
@@ -226,9 +284,13 @@ fn paint_arc_geometry(
 ) {
     let start_world = arc_start_point(arc_center, radius, start_angle);
     let end_world = arc_end_point(arc_center, radius, start_angle, sweep_angle);
-    let start_pos = to_pos(camera.world_to_screen(start_world, center));
-    let end_pos = to_pos(camera.world_to_screen(end_world, center));
-    let center_pos = to_pos(camera.world_to_screen(arc_center, center));
+    let (Some(start_pos), Some(end_pos), Some(center_pos)) = (
+        project_workplane_point(camera, center, workplane, start_world),
+        project_workplane_point(camera, center, workplane, end_world),
+        project_workplane_point(camera, center, workplane, arc_center),
+    ) else {
+        return;
+    };
 
     painter.line_segment(
         [center_pos, start_pos],
@@ -245,7 +307,7 @@ fn paint_arc_geometry(
     let arc_points: Vec<_> =
         arc_sample_points(arc_center, radius, start_angle, sweep_angle, PI / 48.0)
             .into_iter()
-            .map(|point| to_pos(camera.world_to_screen(point, center)))
+            .filter_map(|point| project_workplane_point(camera, center, workplane, point))
             .collect();
     paint_polyline(painter, &arc_points, stroke);
 }
@@ -254,6 +316,7 @@ fn paint_fillet_geometry(
     painter: &egui::Painter,
     camera: &Camera2d,
     center: DVec2,
+    workplane: &Workplane,
     trim_a: (DVec2, DVec2),
     trim_b: (DVec2, DVec2),
     arc_center: DVec2,
@@ -262,20 +325,29 @@ fn paint_fillet_geometry(
     sweep_angle: f64,
     stroke: Stroke,
 ) {
-    let trim_a_start = to_pos(camera.world_to_screen(trim_a.0, center));
-    let trim_a_end = to_pos(camera.world_to_screen(trim_a.1, center));
-    let trim_b_start = to_pos(camera.world_to_screen(trim_b.0, center));
-    let trim_b_end = to_pos(camera.world_to_screen(trim_b.1, center));
+    let (Some(trim_a_start), Some(trim_a_end), Some(trim_b_start), Some(trim_b_end)) = (
+        project_workplane_point(camera, center, workplane, trim_a.0),
+        project_workplane_point(camera, center, workplane, trim_a.1),
+        project_workplane_point(camera, center, workplane, trim_b.0),
+        project_workplane_point(camera, center, workplane, trim_b.1),
+    ) else {
+        return;
+    };
     painter.line_segment([trim_a_start, trim_a_end], stroke);
     painter.line_segment([trim_b_start, trim_b_end], stroke);
 
-    let center_pos = to_pos(camera.world_to_screen(arc_center, center));
     let mid_world = arc_mid_point(arc_center, radius, start_angle, sweep_angle);
-    let mid_pos = to_pos(camera.world_to_screen(mid_world, center));
+    let (Some(center_pos), Some(mid_pos)) = (
+        project_workplane_point(camera, center, workplane, arc_center),
+        project_workplane_point(camera, center, workplane, mid_world),
+    ) else {
+        return;
+    };
     paint_arc_geometry(
         painter,
         camera,
         center,
+        workplane,
         arc_center,
         radius,
         start_angle,
@@ -291,6 +363,7 @@ pub(super) fn paint_rect(
     painter: &egui::Painter,
     camera: &Camera2d,
     center: DVec2,
+    workplane: &Workplane,
     a: DVec2,
     b: DVec2,
     stroke: Stroke,
@@ -302,9 +375,12 @@ pub(super) fn paint_rect(
         DVec2::new(a.x, b.y),
     ];
     for i in 0..4 {
-        let p0 = to_pos(camera.world_to_screen(corners[i], center));
-        let p1 = to_pos(camera.world_to_screen(corners[(i + 1) % 4], center));
-        painter.line_segment([p0, p1], stroke);
+        if let (Some(p0), Some(p1)) = (
+            project_workplane_point(camera, center, workplane, corners[i]),
+            project_workplane_point(camera, center, workplane, corners[(i + 1) % 4]),
+        ) {
+            painter.line_segment([p0, p1], stroke);
+        }
     }
 }
 

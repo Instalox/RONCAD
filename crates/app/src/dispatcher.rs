@@ -9,9 +9,9 @@ use roncad_geometry::{
 
 pub fn apply(project: &mut Project, selection: &mut Selection, command: &AppCommand) {
     match command {
-        AppCommand::CreateSketch { name } => {
-            if let Some(plane_id) = project.workplanes.keys().next() {
-                let id = project.sketches.insert(Sketch::new(name, plane_id));
+        AppCommand::CreateSketch { name, plane } => {
+            if project.workplanes.contains_key(*plane) {
+                let id = project.sketches.insert(Sketch::new(name, *plane));
                 project.active_sketch = Some(id);
                 selection.clear();
             }

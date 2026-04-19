@@ -32,6 +32,8 @@ impl Project {
     pub fn new_untitled() -> Self {
         let mut workplanes = SlotMap::with_key();
         let xy = workplanes.insert(Workplane::xy());
+        workplanes.insert(Workplane::xz());
+        workplanes.insert(Workplane::yz());
 
         let mut sketches = SlotMap::with_key();
         let first = sketches.insert(Sketch::new("Sketch 1", xy));
@@ -57,6 +59,25 @@ impl Project {
             Some(id) => self.sketches.get_mut(id),
             None => None,
         }
+    }
+
+    pub fn sketch_workplane(&self, sketch_id: SketchId) -> Option<&Workplane> {
+        let sketch = self.sketches.get(sketch_id)?;
+        self.workplanes.get(sketch.workplane)
+    }
+
+    pub fn active_workplane(&self) -> Option<&Workplane> {
+        let sketch_id = self.active_sketch?;
+        self.sketch_workplane(sketch_id)
+    }
+
+    pub fn feature_world_bounds(&self, feature: &Feature) -> Option<(glam::DVec3, glam::DVec3)> {
+        let plane = feature
+            .source_sketch()
+            .and_then(|sketch_id| self.sketch_workplane(sketch_id))
+            .or_else(|| self.workplanes.values().next())?;
+        let (min_local, max_local) = feature.bounds_3d();
+        Some(plane.local_bounds_to_world_bounds(min_local, max_local))
     }
 
     pub fn extrude_profile(
