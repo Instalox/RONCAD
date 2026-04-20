@@ -13,6 +13,7 @@ mod profile_overlay;
 mod sketch_overlay;
 mod snap_overlay;
 mod tool_overlay;
+mod nav_gizmo;
 
 use egui::{Color32, Frame, Pos2, Rect, Sense, Ui, UiBuilder};
 use glam::DVec2;
@@ -113,6 +114,7 @@ pub fn render_in_rect(
             mini_hud::paint(ui, rect, shell, response);
             dynamic_overlay::paint(ui, rect, shell);
             extrude_overlay::paint(ui, rect, shell, response);
+            nav_gizmo::paint(ui, rect, shell, response);
         });
 }
 

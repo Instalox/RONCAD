@@ -229,6 +229,14 @@ impl Camera2d {
         self.refresh_pixels_per_mm();
     }
 
+    pub fn yaw_radians(&self) -> f64 {
+        self.yaw_radians
+    }
+
+    pub fn pitch_radians(&self) -> f64 {
+        self.pitch_radians
+    }
+
     pub fn projection(&self) -> Projection {
         self.projection
     }
