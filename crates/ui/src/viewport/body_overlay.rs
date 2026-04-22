@@ -36,6 +36,10 @@ pub(super) fn paint(
         let palette = BodyPalette::for_selection(selected);
 
         for (_, feature) in project.body_features(body_id) {
+            if !feature.is_profile_valid() {
+                continue;
+            }
+
             let Some(workplane) = feature
                 .source_sketch()
                 .and_then(|sketch_id| project.sketch_workplane(sketch_id))

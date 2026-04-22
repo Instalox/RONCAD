@@ -1,7 +1,7 @@
 use glam::{DVec2, DVec3};
 use roncad_core::ids::{BodyId, SketchId};
 
-use crate::SketchProfile;
+use crate::{ProfileKey, SketchProfile, SketchTopology};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Feature {
@@ -42,12 +42,78 @@ impl Feature {
         match self {
             Self::Extrude(feature) if feature.source_sketch == Some(sketch) => {
                 feature.source_sketch = None;
+                feature.profile_key = None;
+                feature.profile_valid = true;
             }
             Self::Revolve(feature) if feature.source_sketch == Some(sketch) => {
                 feature.source_sketch = None;
+                feature.profile_key = None;
+                feature.profile_valid = true;
             }
             Self::Extrude(_) | Self::Revolve(_) => {}
         }
+    }
+
+    pub fn profile_key(&self) -> Option<&ProfileKey> {
+        match self {
+            Self::Extrude(feature) => feature.profile_key.as_ref(),
+            Self::Revolve(feature) => feature.profile_key.as_ref(),
+        }
+    }
+
+    pub fn attach_profile_key(&mut self, key: Option<ProfileKey>) {
+        let is_linked = self.source_sketch().is_some();
+        let is_valid = !is_linked || key.is_some();
+        match self {
+            Self::Extrude(feature) => {
+                feature.profile_key = key;
+                feature.profile_valid = is_valid;
+            }
+            Self::Revolve(feature) => {
+                feature.profile_key = key;
+                feature.profile_valid = is_valid;
+            }
+        }
+    }
+
+    pub fn is_profile_valid(&self) -> bool {
+        match self {
+            Self::Extrude(feature) => feature.profile_valid,
+            Self::Revolve(feature) => feature.profile_valid,
+        }
+    }
+
+    pub fn rebuild_from_topology(&mut self, topology: &SketchTopology) -> bool {
+        let Some(key) = self.profile_key().cloned() else {
+            match self {
+                Self::Extrude(feature) => feature.profile_valid = false,
+                Self::Revolve(feature) => feature.profile_valid = false,
+            }
+            return false;
+        };
+
+        let Some(profile) = topology
+            .profile_by_key(&key)
+            .map(|entry| entry.profile.clone())
+        else {
+            match self {
+                Self::Extrude(feature) => feature.profile_valid = false,
+                Self::Revolve(feature) => feature.profile_valid = false,
+            }
+            return false;
+        };
+
+        match self {
+            Self::Extrude(feature) => {
+                feature.profile = profile;
+                feature.profile_valid = true;
+            }
+            Self::Revolve(feature) => {
+                feature.profile = profile;
+                feature.profile_valid = true;
+            }
+        }
+        true
     }
 
     pub fn profile(&self) -> &SketchProfile {
@@ -65,10 +131,18 @@ impl Feature {
     }
 
     pub fn area_mm2(&self) -> f64 {
-        self.profile().area()
+        if self.is_profile_valid() {
+            self.profile().area()
+        } else {
+            0.0
+        }
     }
 
     pub fn volume_mm3(&self) -> f64 {
+        if !self.is_profile_valid() {
+            return 0.0;
+        }
+
         match self {
             Self::Extrude(feature) => self.area_mm2() * feature.distance_mm.abs(),
             Self::Revolve(feature) => {
@@ -132,6 +206,8 @@ pub struct ExtrudeFeature {
     pub name: String,
     pub body: BodyId,
     pub source_sketch: Option<SketchId>,
+    pub profile_key: Option<ProfileKey>,
+    pub profile_valid: bool,
     pub profile: SketchProfile,
     pub distance_mm: f64,
 }
@@ -148,6 +224,8 @@ impl ExtrudeFeature {
             name: name.into(),
             body,
             source_sketch,
+            profile_key: None,
+            profile_valid: true,
             profile,
             distance_mm,
         }
@@ -159,6 +237,8 @@ pub struct RevolveFeature {
     pub name: String,
     pub body: BodyId,
     pub source_sketch: Option<SketchId>,
+    pub profile_key: Option<ProfileKey>,
+    pub profile_valid: bool,
     pub profile: SketchProfile,
     pub axis_origin: DVec2,
     pub axis_dir: DVec2,
@@ -179,6 +259,8 @@ impl RevolveFeature {
             name: name.into(),
             body,
             source_sketch,
+            profile_key: None,
+            profile_valid: true,
             profile,
             axis_origin,
             axis_dir,

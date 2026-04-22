@@ -15,6 +15,7 @@ pub mod sketch;
 pub mod sketch_dimension;
 pub mod sketch_entity;
 pub mod solver;
+pub mod topology;
 pub mod workplane;
 
 pub use arc::{
@@ -37,4 +38,5 @@ pub use sketch::Sketch;
 pub use sketch_dimension::SketchDimension;
 pub use sketch_entity::SketchEntity;
 pub use solver::{solve_sketch, solve_sketch_with, SolveReport, SolveStatus};
+pub use topology::{ProfileKey, ProfileSpanKey, SketchTopology, TopologyEdge, TopologyProfile};
 pub use workplane::Workplane;

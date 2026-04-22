@@ -357,9 +357,9 @@ pub fn apply(
     }
 
     if let Some(sketch_id) = resolve_target {
-        if let Some(s) = project.sketches.get_mut(sketch_id) {
-            return Some(solve_sketch(s));
-        }
+        let solve_report = project.sketches.get_mut(sketch_id).map(solve_sketch);
+        project.rebuild_features_for_sketch(sketch_id);
+        return solve_report;
     }
 
     None
@@ -820,6 +820,47 @@ mod tests {
                 .constraints
                 .len(),
             1
+        );
+    }
+
+    #[test]
+    fn mutating_linked_sketch_rebuilds_body_feature() {
+        let mut project = Project::new_untitled();
+        let mut selection = Selection::default();
+        let sketch = project.active_sketch.expect("default project has sketch");
+        let entity =
+            project
+                .active_sketch_mut()
+                .expect("active sketch")
+                .add(SketchEntity::Circle {
+                    center: dvec2(5.0, 5.0),
+                    radius: 2.0,
+                });
+        let (body, feature) = project
+            .extrude_profile(
+                sketch,
+                roncad_geometry::SketchProfile::Circle {
+                    center: dvec2(5.0, 5.0),
+                    radius: 2.0,
+                },
+                5.0,
+            )
+            .expect("extrude");
+
+        apply(
+            &mut project,
+            &mut selection,
+            &AppCommand::SetCircleRadius {
+                sketch,
+                entity,
+                radius: LengthMm::new(4.0),
+            },
+        );
+
+        assert!(project.features[feature].is_profile_valid());
+        assert_eq!(
+            project.body_volume_mm3(body),
+            std::f64::consts::PI * 16.0 * 5.0
         );
     }
 

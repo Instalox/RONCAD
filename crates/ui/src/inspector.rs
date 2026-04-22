@@ -124,6 +124,7 @@ fn render_body_selection(ui: &mut Ui, shell: &ShellContext<'_>, body_id: BodyId)
                     "Source",
                     &source_sketch_label(shell, feature.source_sketch()),
                 );
+                property_row(ui, "State", feature_state_label(feature));
             });
     }
 
@@ -291,4 +292,12 @@ fn source_sketch_label(shell: &ShellContext<'_>, sketch_id: Option<SketchId>) ->
         .get(sketch_id)
         .map(|sketch| sketch.name.clone())
         .unwrap_or_else(|| "Detached".to_string())
+}
+
+fn feature_state_label(feature: &roncad_geometry::Feature) -> &'static str {
+    match (feature.source_sketch(), feature.is_profile_valid()) {
+        (Some(_), true) => "Linked",
+        (Some(_), false) => "Broken",
+        (None, _) => "Snapshot",
+    }
 }

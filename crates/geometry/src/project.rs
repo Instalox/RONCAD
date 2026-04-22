@@ -1,12 +1,15 @@
 //! The authoritative Project model: workplanes, sketches, and now body/feature
 //! state for persistent operations like extrusion.
 
+use std::collections::HashMap;
+
 use roncad_core::ids::{BodyId, FeatureId, SketchId, WorkplaneId};
 use slotmap::SlotMap;
 
 use crate::body::Body;
 use crate::feature::{ExtrudeFeature, Feature, RevolveFeature};
 use crate::sketch::Sketch;
+use crate::topology::SketchTopology;
 use crate::workplane::Workplane;
 use crate::SketchProfile;
 
@@ -61,7 +64,7 @@ impl Project {
         let next_body_serial = next_body_serial(&bodies);
         let next_feature_serial = next_feature_serial(&features);
 
-        Self {
+        let mut project = Self {
             name: name.into(),
             workplanes,
             sketches,
@@ -70,7 +73,9 @@ impl Project {
             active_sketch,
             next_body_serial,
             next_feature_serial,
-        }
+        };
+        project.reattach_feature_profile_links();
+        project
     }
 
     pub fn active_sketch(&self) -> Option<&Sketch> {
@@ -95,6 +100,10 @@ impl Project {
     }
 
     pub fn feature_world_bounds(&self, feature: &Feature) -> Option<(glam::DVec3, glam::DVec3)> {
+        if !feature.is_profile_valid() {
+            return None;
+        }
+
         let plane = feature
             .source_sketch()
             .and_then(|sketch_id| self.sketch_workplane(sketch_id))
@@ -113,16 +122,23 @@ impl Project {
             return None;
         }
 
+        let profile_key = self
+            .sketches
+            .get(sketch)
+            .map(SketchTopology::from_sketch)
+            .and_then(|topology| {
+                topology
+                    .find_profile(&profile)
+                    .map(|entry| entry.key.clone())
+            });
+        let source_sketch = profile_key.as_ref().map(|_| sketch);
         let body_name = self.allocate_body_name();
         let feature_name = self.allocate_feature_name("Extrude");
         let body_id = self.bodies.insert(Body::new(body_name));
-        let feature_id = self.features.insert(Feature::Extrude(ExtrudeFeature::new(
-            feature_name,
-            body_id,
-            Some(sketch),
-            profile,
-            distance_mm,
-        )));
+        let mut feature =
+            ExtrudeFeature::new(feature_name, body_id, source_sketch, profile, distance_mm);
+        feature.profile_key = profile_key;
+        let feature_id = self.features.insert(Feature::Extrude(feature));
         self.bodies.get_mut(body_id)?.push_feature(feature_id);
         Some((body_id, feature_id))
     }
@@ -142,18 +158,30 @@ impl Project {
             return None;
         }
 
+        let profile_key = self
+            .sketches
+            .get(sketch)
+            .map(SketchTopology::from_sketch)
+            .and_then(|topology| {
+                topology
+                    .find_profile(&profile)
+                    .map(|entry| entry.key.clone())
+            });
+        let source_sketch = profile_key.as_ref().map(|_| sketch);
         let body_name = self.allocate_body_name();
         let feature_name = self.allocate_feature_name("Revolve");
         let body_id = self.bodies.insert(Body::new(body_name));
-        let feature_id = self.features.insert(Feature::Revolve(RevolveFeature::new(
+        let mut feature = RevolveFeature::new(
             feature_name,
             body_id,
-            Some(sketch),
+            source_sketch,
             profile,
             axis_origin,
             axis_dir.normalize(),
             angle_rad,
-        )));
+        );
+        feature.profile_key = profile_key;
+        let feature_id = self.features.insert(Feature::Revolve(feature));
         self.bodies.get_mut(body_id)?.push_feature(feature_id);
         Some((body_id, feature_id))
     }
@@ -171,6 +199,18 @@ impl Project {
     pub fn clear_feature_sketch_source(&mut self, sketch_id: SketchId) {
         for (_, feature) in self.features.iter_mut() {
             feature.clear_source_sketch_if_matches(sketch_id);
+        }
+    }
+
+    pub fn rebuild_features_for_sketch(&mut self, sketch_id: SketchId) {
+        let Some(sketch) = self.sketches.get(sketch_id) else {
+            return;
+        };
+        let topology = SketchTopology::from_sketch(sketch);
+        for (_, feature) in self.features.iter_mut() {
+            if feature.source_sketch() == Some(sketch_id) {
+                feature.rebuild_from_topology(&topology);
+            }
         }
     }
 
@@ -193,6 +233,7 @@ impl Project {
 
     pub fn body_volume_mm3(&self, body_id: BodyId) -> f64 {
         self.body_features(body_id)
+            .filter(|(_, feature)| feature.is_profile_valid())
             .map(|(_, feature)| feature.volume_mm3())
             .sum()
     }
@@ -207,6 +248,29 @@ impl Project {
         let name = format!("{} {}", prefix, self.next_feature_serial);
         self.next_feature_serial += 1;
         name
+    }
+
+    fn reattach_feature_profile_links(&mut self) {
+        let sketches = &self.sketches;
+        let mut topology_cache = HashMap::<SketchId, SketchTopology>::new();
+
+        for (_, feature) in self.features.iter_mut() {
+            let Some(sketch_id) = feature.source_sketch() else {
+                feature.attach_profile_key(None);
+                continue;
+            };
+
+            let topology = topology_cache.entry(sketch_id).or_insert_with(|| {
+                sketches
+                    .get(sketch_id)
+                    .map(SketchTopology::from_sketch)
+                    .unwrap_or_default()
+            });
+            let key = topology
+                .find_profile(feature.profile())
+                .map(|entry| entry.key.clone());
+            feature.attach_profile_key(key);
+        }
     }
 }
 
@@ -297,5 +361,73 @@ mod tests {
 
         assert!(project.bodies.is_empty());
         assert!(project.features.is_empty());
+    }
+
+    #[test]
+    fn rebuild_features_for_sketch_refreshes_linked_profile() {
+        let mut project = Project::new_untitled();
+        let sketch_id = project.active_sketch.expect("sketch");
+        let circle =
+            project
+                .sketches
+                .get_mut(sketch_id)
+                .expect("sketch")
+                .add(crate::SketchEntity::Circle {
+                    center: dvec2(5.0, 5.0),
+                    radius: 2.0,
+                });
+        let profile = SketchProfile::Circle {
+            center: dvec2(5.0, 5.0),
+            radius: 2.0,
+        };
+        let (_, feature_id) = project
+            .extrude_profile(sketch_id, profile, 10.0)
+            .expect("extrude");
+
+        if let crate::SketchEntity::Circle { radius, .. } = project.sketches[sketch_id]
+            .entities
+            .get_mut(circle)
+            .expect("circle")
+        {
+            *radius = 4.0;
+        }
+
+        project.rebuild_features_for_sketch(sketch_id);
+
+        let feature = project.features.get(feature_id).expect("feature");
+        assert!(feature.is_profile_valid());
+        assert_eq!(feature.area_mm2(), std::f64::consts::PI * 16.0);
+    }
+
+    #[test]
+    fn rebuild_features_for_sketch_invalidates_missing_profile() {
+        let mut project = Project::new_untitled();
+        let sketch_id = project.active_sketch.expect("sketch");
+        let circle =
+            project
+                .sketches
+                .get_mut(sketch_id)
+                .expect("sketch")
+                .add(crate::SketchEntity::Circle {
+                    center: dvec2(5.0, 5.0),
+                    radius: 2.0,
+                });
+        let (_, feature_id) = project
+            .extrude_profile(
+                sketch_id,
+                SketchProfile::Circle {
+                    center: dvec2(5.0, 5.0),
+                    radius: 2.0,
+                },
+                10.0,
+            )
+            .expect("extrude");
+
+        project.sketches[sketch_id].remove(circle);
+        project.rebuild_features_for_sketch(sketch_id);
+
+        let feature = project.features.get(feature_id).expect("feature");
+        assert!(!feature.is_profile_valid());
+        assert_eq!(project.body_volume_mm3(feature.body()), 0.0);
     }
 }
