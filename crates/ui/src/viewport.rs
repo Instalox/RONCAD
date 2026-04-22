@@ -79,6 +79,7 @@ pub fn render_in_rect(
                 shell.selection,
                 shell.last_solve_report,
                 interaction.hovered_target.as_ref(),
+                &response.highlighted_sketch_entities,
             );
             dimension_overlay::paint(
                 ui.painter(),
@@ -93,6 +94,7 @@ pub fn render_in_rect(
                 shell.camera,
                 shell.project,
                 shell.last_solve_report,
+                response.highlighted_constraint,
             );
             profile_overlay::paint(
                 ui.painter(),

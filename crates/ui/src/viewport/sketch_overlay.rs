@@ -18,6 +18,7 @@ pub(super) fn paint(
     selection: &Selection,
     report: Option<&SolveReport>,
     hovered_target: Option<&HoverTarget>,
+    highlighted_entities: &[(roncad_core::ids::SketchId, roncad_core::ids::SketchEntityId)],
 ) {
     let Some(sketch_id) = project.active_sketch else {
         return;
@@ -37,11 +38,16 @@ pub(super) fn paint(
         });
         let hovered =
             hovered_target.is_some_and(|target| target.matches_sketch_entity(sketch_id, entity_id));
+        let highlighted = highlighted_entities
+            .iter()
+            .any(|(sketch, entity)| *sketch == sketch_id && *entity == entity_id);
         let problem = problem_entity_kind(report, entity_id);
         let color = if selected {
             ThemeColors::ACCENT
         } else if hovered {
             COLOR_HOVER
+        } else if highlighted {
+            ThemeColors::ACCENT_GREEN
         } else if problem == Some(ConstraintDiagnosticKind::Failed) {
             ThemeColors::ACCENT_RED
         } else if problem == Some(ConstraintDiagnosticKind::Unsatisfied) {
@@ -55,18 +61,26 @@ pub(super) fn paint(
             2.2
         } else if hovered {
             2.0
+        } else if highlighted {
+            2.2
         } else if problem.is_some() {
             2.1
         } else {
             1.6
         };
-        let vertex_width = if selected || hovered { 1.6 } else { 1.0 };
+        let vertex_width = if selected || hovered || highlighted {
+            1.6
+        } else {
+            1.0
+        };
         let point_radius = if selected && hovered {
             4.5
         } else if selected {
             4.0
         } else if hovered {
             3.5
+        } else if highlighted {
+            3.8
         } else {
             2.5
         };

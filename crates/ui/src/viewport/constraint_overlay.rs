@@ -5,7 +5,7 @@
 use egui::{Align2, Color32, FontId, Rect};
 use glam::DVec2;
 use roncad_core::constraint::{Constraint, EntityPoint};
-use roncad_core::ids::{ConstraintId, SketchEntityId};
+use roncad_core::ids::{ConstraintId, SketchEntityId, SketchId};
 use roncad_geometry::{
     resolve_entity_point, ConstraintDiagnosticKind, Project, SketchEntity, SolveReport, Workplane,
 };
@@ -24,6 +24,7 @@ pub(super) fn paint(
     camera: &Camera2d,
     project: &Project,
     report: Option<&SolveReport>,
+    highlighted_constraint: Option<(SketchId, ConstraintId)>,
 ) {
     let Some(sketch) = project.active_sketch() else {
         return;
@@ -45,6 +46,9 @@ pub(super) fn paint(
             constraint,
             report,
             &font,
+            highlighted_constraint
+                .filter(|(sketch_id, _)| Some(*sketch_id) == project.active_sketch)
+                .map(|(_, id)| id),
         );
     }
 }
@@ -59,8 +63,13 @@ fn paint_constraint(
     constraint: &Constraint,
     report: Option<&SolveReport>,
     font: &FontId,
+    highlighted_constraint: Option<ConstraintId>,
 ) {
-    let color = diagnostic_color(report, constraint_id);
+    let color = if highlighted_constraint == Some(constraint_id) {
+        ThemeColors::ACCENT_GREEN
+    } else {
+        diagnostic_color(report, constraint_id)
+    };
     match *constraint {
         Constraint::Horizontal { entity } => {
             if let Some(point) = line_midpoint(sketch, entity) {

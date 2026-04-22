@@ -9,6 +9,7 @@ mod hud_state;
 mod revolve_state;
 
 pub use command_palette::CommandPaletteState;
+pub use constraints::ConstraintPanelState;
 pub use extrude_state::ExtrudeHudState;
 pub use revolve_state::RevolveHudState;
 pub mod inspector;

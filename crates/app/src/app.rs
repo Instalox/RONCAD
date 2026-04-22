@@ -14,8 +14,8 @@ use roncad_project_io::{load_project, save_project};
 use roncad_rendering::Camera2d;
 use roncad_tools::{ActiveToolKind, SnapEngine, SnapResult, ToolManager};
 use roncad_ui::{
-    apply_dark_theme, render_shell, theme::ThemeColors, CommandPaletteState, ExtrudeHudState,
-    HudEditState, RevolveHudState, ShellContext, ShellResponse,
+    apply_dark_theme, render_shell, theme::ThemeColors, CommandPaletteState, ConstraintPanelState,
+    ExtrudeHudState, HudEditState, RevolveHudState, ShellContext, ShellResponse,
 };
 
 use crate::dispatcher;
@@ -70,6 +70,7 @@ struct UiState {
     command_palette: CommandPaletteState,
     extrude_hud: ExtrudeHudState,
     revolve_hud: RevolveHudState,
+    constraint_panel: ConstraintPanelState,
     new_sketch_plane: Option<WorkplaneId>,
     recent_files: Vec<PathBuf>,
     file_dialog: Option<FileDialogState>,
@@ -709,6 +710,7 @@ impl App for RonCadApp {
             command_palette: &mut self.ui.command_palette,
             extrude_hud: &mut self.ui.extrude_hud,
             revolve_hud: &mut self.ui.revolve_hud,
+            constraint_panel: &mut self.ui.constraint_panel,
             new_sketch_plane: &mut self.ui.new_sketch_plane,
             document_dirty: self.document.dirty,
             document_path: self.document.path.as_deref(),

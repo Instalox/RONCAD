@@ -16,9 +16,41 @@ use crate::theme::ThemeColors;
 
 const PREVIEW_ROW_LIMIT: usize = 4;
 
+#[derive(Clone, Copy, PartialEq, Eq, Default)]
+pub enum ConstraintTypeFilter {
+    #[default]
+    All,
+    Coincident,
+    FixPoint,
+    PointOnEntity,
+    Horizontal,
+    Vertical,
+    Parallel,
+    Perpendicular,
+    Tangent,
+    EqualLength,
+    EqualRadius,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Default)]
+pub enum ConstraintProblemFilter {
+    #[default]
+    All,
+    Problems,
+    Healthy,
+    Unsatisfied,
+    Failed,
+}
+
+#[derive(Default)]
+pub struct ConstraintPanelState {
+    pub type_filter: ConstraintTypeFilter,
+    pub problem_filter: ConstraintProblemFilter,
+}
+
 pub fn render_constraints_section(
     ui: &mut Ui,
-    shell: &ShellContext<'_>,
+    shell: &mut ShellContext<'_>,
     response: &mut ShellResponse,
 ) {
     let Some(sketch_id) = shell.project.active_sketch else {
@@ -39,8 +71,8 @@ pub fn render_constraints_section(
     let profile_count = closed_profiles(sketch).len();
     let dimension_count = sketch.dimensions.len();
     let constraint_count = sketch.constraints.len();
-    let diagnostics = shell
-        .last_solve_report
+    let last_solve_report = shell.last_solve_report;
+    let diagnostics = last_solve_report
         .map(|report| report.diagnostics.as_slice())
         .unwrap_or(&[]);
     let selected_entities = selected_sketch_entities(shell.selection, sketch_id);
@@ -50,6 +82,8 @@ pub fn render_constraints_section(
     } else {
         Vec::new()
     };
+    let filtered_constraints =
+        collect_filtered_constraints(sketch, last_solve_report, shell.constraint_panel);
 
     stat_row(ui, "Sketch", &sketch.name, ThemeColors::TEXT);
     stat_row(
@@ -135,56 +169,41 @@ pub fn render_constraints_section(
     }
 
     ui.add_space(8.0);
-    if !diagnostics.is_empty() {
-        relation_list(
-            ui,
-            "Problem constraints",
-            diagnostic_color(diagnostics.first().map(|item| item.kind)),
-            diagnostics.len(),
-            |ui| {
-                for (index, diagnostic) in diagnostics.iter().take(PREVIEW_ROW_LIMIT).enumerate() {
-                    ui.push_id(("constraint_problem_row", index), |ui| {
-                        constraint_row(
-                            ui,
-                            response,
-                            sketch_id,
-                            diagnostic.id,
-                            sketch,
-                            &diagnostic.constraint,
-                            Some(diagnostic),
-                        );
-                    });
-                }
-            },
-        );
-        ui.add_space(8.0);
-    }
-
-    relation_list(
+    constraint_manager_header(
         ui,
-        "Constraints",
-        ThemeColors::ACCENT,
+        shell.constraint_panel,
         constraint_count,
-        |ui| {
-            for (index, (constraint_id, constraint)) in sketch
-                .iter_constraints()
-                .take(PREVIEW_ROW_LIMIT)
-                .enumerate()
-            {
-                ui.push_id(("constraint_row", index), |ui| {
-                    constraint_row(
-                        ui,
-                        response,
-                        sketch_id,
-                        constraint_id,
-                        sketch,
-                        constraint,
-                        diagnostic_for_constraint(shell.last_solve_report, constraint_id),
-                    );
-                });
-            }
-        },
+        filtered_constraints.len(),
+        diagnostics.len(),
     );
+    ui.add_space(6.0);
+    if filtered_constraints.is_empty() {
+        ui.colored_label(
+            ThemeColors::TEXT_DIM,
+            RichText::new(if constraint_count == 0 {
+                "No constraints yet."
+            } else {
+                "No constraints match the current filters."
+            })
+            .size(11.5),
+        );
+    } else {
+        for (index, (constraint_id, constraint, diagnostic)) in
+            filtered_constraints.into_iter().enumerate()
+        {
+            ui.push_id(("constraint_manager_row", index), |ui| {
+                constraint_row(
+                    ui,
+                    response,
+                    sketch_id,
+                    constraint_id,
+                    sketch,
+                    constraint,
+                    diagnostic,
+                );
+            });
+        }
+    }
 
     ui.add_space(8.0);
     relation_list(
@@ -453,6 +472,75 @@ fn relation_list(
     }
 }
 
+fn constraint_manager_header(
+    ui: &mut Ui,
+    state: &mut ConstraintPanelState,
+    total_count: usize,
+    filtered_count: usize,
+    problem_count: usize,
+) {
+    ui.colored_label(
+        ThemeColors::TEXT_DIM,
+        RichText::new("Constraint manager").size(11.0),
+    );
+    ui.add_space(4.0);
+    ui.horizontal(|ui| {
+        ui.colored_label(ThemeColors::TEXT_DIM, RichText::new("Type").size(10.5));
+        egui::ComboBox::from_id_salt("constraint_type_filter")
+            .selected_text(constraint_type_filter_label(state.type_filter))
+            .width(132.0)
+            .show_ui(ui, |ui| {
+                for filter in [
+                    ConstraintTypeFilter::All,
+                    ConstraintTypeFilter::Coincident,
+                    ConstraintTypeFilter::FixPoint,
+                    ConstraintTypeFilter::PointOnEntity,
+                    ConstraintTypeFilter::Horizontal,
+                    ConstraintTypeFilter::Vertical,
+                    ConstraintTypeFilter::Parallel,
+                    ConstraintTypeFilter::Perpendicular,
+                    ConstraintTypeFilter::Tangent,
+                    ConstraintTypeFilter::EqualLength,
+                    ConstraintTypeFilter::EqualRadius,
+                ] {
+                    ui.selectable_value(
+                        &mut state.type_filter,
+                        filter,
+                        constraint_type_filter_label(filter),
+                    );
+                }
+            });
+    });
+    ui.add_space(4.0);
+    ui.horizontal_wrapped(|ui| {
+        ui.colored_label(ThemeColors::TEXT_DIM, RichText::new("State").size(10.5));
+        for filter in [
+            ConstraintProblemFilter::All,
+            ConstraintProblemFilter::Problems,
+            ConstraintProblemFilter::Healthy,
+            ConstraintProblemFilter::Unsatisfied,
+            ConstraintProblemFilter::Failed,
+        ] {
+            ui.selectable_value(
+                &mut state.problem_filter,
+                filter,
+                constraint_problem_filter_label(filter),
+            );
+        }
+    });
+    ui.add_space(4.0);
+    let summary = if problem_count > 0 {
+        format!(
+            "Showing {filtered_count} of {total_count} constraints. Hover a row to inspect linked geometry; {problem_count} currently need attention."
+        )
+    } else {
+        format!(
+            "Showing {filtered_count} of {total_count} constraints. Hover a row to inspect linked geometry."
+        )
+    };
+    ui.colored_label(ThemeColors::TEXT_DIM, RichText::new(summary).size(10.5));
+}
+
 fn stat_row(ui: &mut Ui, label: &str, value: &str, color: egui::Color32) {
     ui.horizontal(|ui| {
         ui.add_sized(
@@ -473,6 +561,7 @@ fn constraint_row(
     diagnostic: Option<&ConstraintDiagnostic>,
 ) {
     let accent = diagnostic_color(diagnostic.map(|item| item.kind));
+    let referenced_entities = constraint.referenced_entities();
     let stroke = Stroke::new(
         1.0,
         if diagnostic.is_some() {
@@ -481,7 +570,7 @@ fn constraint_row(
             ThemeColors::SEPARATOR_SOFT
         },
     );
-    Frame::new()
+    let row = Frame::new()
         .fill(ThemeColors::BG_PANEL_ALT)
         .stroke(stroke)
         .inner_margin(Margin::symmetric(6, 5))
@@ -499,8 +588,7 @@ fn constraint_row(
                 ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
                     let delete = ui
                         .add(
-                            Button::new(RichText::new(ph::TRASH).size(10.5))
-                                .frame(false)
+                            Button::new(RichText::new(format!("{} Delete", ph::TRASH)).size(10.0))
                                 .small(),
                         )
                         .on_hover_text("Delete constraint");
@@ -538,6 +626,13 @@ fn constraint_row(
                 );
             }
         });
+    if row.response.hovered() {
+        response.highlighted_constraint = Some((sketch_id, constraint_id));
+        response.highlighted_sketch_entities = referenced_entities
+            .into_iter()
+            .map(|entity_id| (sketch_id, entity_id))
+            .collect();
+    }
 }
 
 fn dimension_row(ui: &mut Ui, dimension: &SketchDimension) {
@@ -626,6 +721,100 @@ fn diagnostic_color(kind: Option<ConstraintDiagnosticKind>) -> egui::Color32 {
         Some(ConstraintDiagnosticKind::Unsatisfied) => ThemeColors::ACCENT_AMBER,
         Some(ConstraintDiagnosticKind::Failed) => ThemeColors::ACCENT_RED,
         None => ThemeColors::ACCENT,
+    }
+}
+
+fn collect_filtered_constraints<'a>(
+    sketch: &'a Sketch,
+    report: Option<&'a SolveReport>,
+    filters: &ConstraintPanelState,
+) -> Vec<(
+    ConstraintId,
+    &'a Constraint,
+    Option<&'a ConstraintDiagnostic>,
+)> {
+    let mut constraints = sketch
+        .iter_constraints()
+        .filter_map(|(constraint_id, constraint)| {
+            let diagnostic = diagnostic_for_constraint(report, constraint_id);
+            if constraint_matches_type(filters.type_filter, constraint)
+                && constraint_matches_problem(filters.problem_filter, diagnostic)
+            {
+                Some((constraint_id, constraint, diagnostic))
+            } else {
+                None
+            }
+        })
+        .collect::<Vec<_>>();
+    constraints.sort_by_key(
+        |(_, _, diagnostic)| match diagnostic.map(|item| item.kind) {
+            Some(ConstraintDiagnosticKind::Failed) => 0,
+            Some(ConstraintDiagnosticKind::Unsatisfied) => 1,
+            None => 2,
+        },
+    );
+    constraints
+}
+
+fn constraint_matches_type(filter: ConstraintTypeFilter, constraint: &Constraint) -> bool {
+    match filter {
+        ConstraintTypeFilter::All => true,
+        ConstraintTypeFilter::Coincident => matches!(constraint, Constraint::Coincident { .. }),
+        ConstraintTypeFilter::FixPoint => matches!(constraint, Constraint::FixPoint { .. }),
+        ConstraintTypeFilter::PointOnEntity => {
+            matches!(constraint, Constraint::PointOnEntity { .. })
+        }
+        ConstraintTypeFilter::Horizontal => matches!(constraint, Constraint::Horizontal { .. }),
+        ConstraintTypeFilter::Vertical => matches!(constraint, Constraint::Vertical { .. }),
+        ConstraintTypeFilter::Parallel => matches!(constraint, Constraint::Parallel { .. }),
+        ConstraintTypeFilter::Perpendicular => {
+            matches!(constraint, Constraint::Perpendicular { .. })
+        }
+        ConstraintTypeFilter::Tangent => matches!(constraint, Constraint::Tangent { .. }),
+        ConstraintTypeFilter::EqualLength => matches!(constraint, Constraint::EqualLength { .. }),
+        ConstraintTypeFilter::EqualRadius => matches!(constraint, Constraint::EqualRadius { .. }),
+    }
+}
+
+fn constraint_matches_problem(
+    filter: ConstraintProblemFilter,
+    diagnostic: Option<&ConstraintDiagnostic>,
+) -> bool {
+    match filter {
+        ConstraintProblemFilter::All => true,
+        ConstraintProblemFilter::Problems => diagnostic.is_some(),
+        ConstraintProblemFilter::Healthy => diagnostic.is_none(),
+        ConstraintProblemFilter::Unsatisfied => diagnostic
+            .is_some_and(|diagnostic| diagnostic.kind == ConstraintDiagnosticKind::Unsatisfied),
+        ConstraintProblemFilter::Failed => {
+            diagnostic.is_some_and(|diagnostic| diagnostic.kind == ConstraintDiagnosticKind::Failed)
+        }
+    }
+}
+
+fn constraint_type_filter_label(filter: ConstraintTypeFilter) -> &'static str {
+    match filter {
+        ConstraintTypeFilter::All => "All types",
+        ConstraintTypeFilter::Coincident => "Coincident",
+        ConstraintTypeFilter::FixPoint => "Fixed point",
+        ConstraintTypeFilter::PointOnEntity => "Point on entity",
+        ConstraintTypeFilter::Horizontal => "Horizontal",
+        ConstraintTypeFilter::Vertical => "Vertical",
+        ConstraintTypeFilter::Parallel => "Parallel",
+        ConstraintTypeFilter::Perpendicular => "Perpendicular",
+        ConstraintTypeFilter::Tangent => "Tangent",
+        ConstraintTypeFilter::EqualLength => "Equal length",
+        ConstraintTypeFilter::EqualRadius => "Equal radius",
+    }
+}
+
+fn constraint_problem_filter_label(filter: ConstraintProblemFilter) -> &'static str {
+    match filter {
+        ConstraintProblemFilter::All => "All",
+        ConstraintProblemFilter::Problems => "Problems",
+        ConstraintProblemFilter::Healthy => "Healthy",
+        ConstraintProblemFilter::Unsatisfied => "Unsatisfied",
+        ConstraintProblemFilter::Failed => "Failed",
     }
 }
 
@@ -725,9 +914,15 @@ fn entity_slot(entity_id: SketchEntityId) -> u32 {
 mod tests {
     use glam::dvec2;
     use roncad_core::selection::{Selection, SelectionItem};
-    use roncad_geometry::{Constraint, EntityPoint, Project, SketchEntity};
+    use roncad_geometry::{
+        Constraint, ConstraintDiagnostic, ConstraintDiagnosticKind, EntityPoint, Project,
+        SketchEntity, SolveReport, SolveStatus,
+    };
 
-    use super::{selected_sketch_entities, suggested_constraint_actions};
+    use super::{
+        collect_filtered_constraints, selected_sketch_entities, suggested_constraint_actions,
+        ConstraintPanelState, ConstraintProblemFilter, ConstraintTypeFilter,
+    };
 
     #[test]
     fn single_line_suggests_horizontal_and_vertical() {
@@ -773,6 +968,44 @@ mod tests {
                 target
             } if entity == point && target == dvec2(3.0, 4.0)
         ));
+    }
+
+    #[test]
+    fn filtered_constraints_can_focus_problem_rows() {
+        let mut project = Project::new_untitled();
+        let sketch_id = project.active_sketch.expect("sketch");
+        let sketch = project.sketches.get_mut(sketch_id).expect("sketch");
+        let line = sketch.add(SketchEntity::Line {
+            a: dvec2(0.0, 0.0),
+            b: dvec2(10.0, 3.0),
+        });
+        let horizontal_id = sketch.add_constraint(Constraint::Horizontal { entity: line });
+        let _vertical_id = sketch.add_constraint(Constraint::Vertical { entity: line });
+        let report = SolveReport {
+            status: SolveStatus::Conflicting,
+            iterations: 3,
+            final_residual_norm: 1.0,
+            constraint_count: 2,
+            unsatisfied_count: 1,
+            failed_count: 0,
+            estimated_free_dofs: 0,
+            diagnostics: vec![ConstraintDiagnostic {
+                id: horizontal_id,
+                constraint: Constraint::Horizontal { entity: line },
+                kind: ConstraintDiagnosticKind::Unsatisfied,
+                residual_norm: 1.0,
+                referenced_entities: vec![line],
+            }],
+        };
+        let filters = ConstraintPanelState {
+            type_filter: ConstraintTypeFilter::All,
+            problem_filter: ConstraintProblemFilter::Problems,
+        };
+
+        let filtered = collect_filtered_constraints(sketch, Some(&report), &filters);
+
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].0, horizontal_id);
     }
 
     #[test]

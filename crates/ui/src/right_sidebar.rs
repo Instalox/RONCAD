@@ -10,7 +10,7 @@ use crate::project_tree;
 use crate::shell::{ShellContext, ShellResponse};
 use crate::theme::ThemeColors;
 
-pub fn render(ui: &mut Ui, shell: &ShellContext<'_>, response: &mut ShellResponse) {
+pub fn render(ui: &mut Ui, shell: &mut ShellContext<'_>, response: &mut ShellResponse) {
     let browser_badge =
         (!shell.project.sketches.is_empty()).then(|| shell.project.sketches.len().to_string());
     let constraints_badge = shell

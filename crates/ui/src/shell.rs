@@ -5,14 +5,16 @@ use std::path::{Path, PathBuf};
 
 use egui::{pos2, Rect, Sense, Ui};
 use roncad_core::command::AppCommand;
-use roncad_core::ids::WorkplaneId;
+use roncad_core::ids::{ConstraintId, SketchEntityId, SketchId, WorkplaneId};
 use roncad_core::selection::Selection;
 use roncad_geometry::{Project, SolveReport};
 use roncad_rendering::Camera2d;
 use roncad_tools::{SnapEngine, SnapResult, ToolManager};
 
 use crate::{
-    command_palette, right_sidebar, status_bar, tool_shelf, toolbar,
+    command_palette,
+    constraints::ConstraintPanelState,
+    right_sidebar, status_bar, tool_shelf, toolbar,
     viewport::{self, ViewportInteractionHandler},
     CommandPaletteState,
 };
@@ -31,6 +33,7 @@ pub struct ShellContext<'a> {
     pub extrude_hud: &'a mut ExtrudeHudState,
     pub new_sketch_plane: &'a mut Option<WorkplaneId>,
     pub revolve_hud: &'a mut RevolveHudState,
+    pub constraint_panel: &'a mut ConstraintPanelState,
     pub document_dirty: bool,
     pub document_path: Option<&'a Path>,
     pub recent_files: &'a [PathBuf],
@@ -42,6 +45,8 @@ pub struct ShellContext<'a> {
 #[derive(Default)]
 pub struct ShellResponse {
     pub commands: Vec<AppCommand>,
+    pub highlighted_sketch_entities: Vec<(SketchId, SketchEntityId)>,
+    pub highlighted_constraint: Option<(SketchId, ConstraintId)>,
     pub fit_view_requested: bool,
     pub fit_selection_requested: bool,
     pub quit_requested: bool,
