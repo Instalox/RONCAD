@@ -385,6 +385,10 @@ pub enum ConstraintFile {
         a: EntityPointFile,
         b: EntityPointFile,
     },
+    FixPoint {
+        point: EntityPointFile,
+        target: DVec2,
+    },
     PointOnEntity {
         point: EntityPointFile,
         entity: FileId,
@@ -427,6 +431,10 @@ impl ConstraintFile {
                 a: EntityPointFile::from_entity_point(*a, entity_ids)?,
                 b: EntityPointFile::from_entity_point(*b, entity_ids)?,
             },
+            Constraint::FixPoint { point, target } => Self::FixPoint {
+                point: EntityPointFile::from_entity_point(*point, entity_ids)?,
+                target: *target,
+            },
             Constraint::PointOnEntity { point, entity } => Self::PointOnEntity {
                 point: EntityPointFile::from_entity_point(*point, entity_ids)?,
                 entity: lookup_file_id(entity_ids, *entity, "sketch entity")?,
@@ -466,6 +474,10 @@ impl ConstraintFile {
                 a: a.into_entity_point(entity_ids)?,
                 b: b.into_entity_point(entity_ids)?,
             },
+            Self::FixPoint { point, target } => Constraint::FixPoint {
+                point: point.into_entity_point(entity_ids)?,
+                target,
+            },
             Self::PointOnEntity { point, entity } => Constraint::PointOnEntity {
                 point: point.into_entity_point(entity_ids)?,
                 entity: lookup_slot_id(entity_ids, entity, "sketch entity")?,
@@ -503,6 +515,7 @@ impl ConstraintFile {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "point", content = "entity", rename_all = "snake_case")]
 pub enum EntityPointFile {
+    Point(FileId),
     Start(FileId),
     End(FileId),
     Center(FileId),
@@ -514,6 +527,7 @@ impl EntityPointFile {
         entity_ids: &HashMap<SketchEntityId, FileId>,
     ) -> Result<Self> {
         Ok(match point {
+            EntityPoint::Point(id) => Self::Point(lookup_file_id(entity_ids, id, "sketch entity")?),
             EntityPoint::Start(id) => Self::Start(lookup_file_id(entity_ids, id, "sketch entity")?),
             EntityPoint::End(id) => Self::End(lookup_file_id(entity_ids, id, "sketch entity")?),
             EntityPoint::Center(id) => {
@@ -527,6 +541,7 @@ impl EntityPointFile {
         entity_ids: &HashMap<FileId, SketchEntityId>,
     ) -> Result<EntityPoint> {
         Ok(match self {
+            Self::Point(id) => EntityPoint::Point(lookup_slot_id(entity_ids, id, "sketch entity")?),
             Self::Start(id) => EntityPoint::Start(lookup_slot_id(entity_ids, id, "sketch entity")?),
             Self::End(id) => EntityPoint::End(lookup_slot_id(entity_ids, id, "sketch entity")?),
             Self::Center(id) => {
@@ -844,6 +859,9 @@ mod tests {
             center: dvec2(10.0, 0.0),
             radius: 2.0,
         });
+        let point = sketch.add(SketchEntity::Point {
+            p: dvec2(-2.0, 4.0),
+        });
         sketch.add_dimension(SketchDimension::Distance {
             start: dvec2(0.0, 0.0),
             end: dvec2(5.0, 0.0),
@@ -856,6 +874,10 @@ mod tests {
         sketch.add_constraint(Constraint::PointOnEntity {
             point: EntityPoint::Center(circle),
             entity: line_a,
+        });
+        sketch.add_constraint(Constraint::FixPoint {
+            point: EntityPoint::Point(point),
+            target: dvec2(-2.0, 4.0),
         });
 
         let (body, feature) = project
@@ -874,9 +896,9 @@ mod tests {
 
         assert_eq!(loaded.sketches.len(), 1);
         let loaded_sketch = loaded.active_sketch().expect("loaded sketch");
-        assert_eq!(loaded_sketch.entities.len(), 3);
+        assert_eq!(loaded_sketch.entities.len(), 4);
         assert_eq!(loaded_sketch.dimensions.len(), 1);
-        assert_eq!(loaded_sketch.constraints.len(), 3);
+        assert_eq!(loaded_sketch.constraints.len(), 4);
         assert_eq!(loaded.bodies.len(), 1);
         assert_eq!(loaded.features.len(), 1);
 

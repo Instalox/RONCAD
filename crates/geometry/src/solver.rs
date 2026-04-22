@@ -325,6 +325,7 @@ fn unpack_dofs(sketch: &mut Sketch, layout: &DofLayout, x: &[f64]) {
 fn entity_point(x: &[f64], layout: &DofLayout, handle: EntityPoint) -> Option<DVec2> {
     let (off, kind) = layout.ranges.get(&handle.entity()).copied()?;
     match (handle, kind) {
+        (EntityPoint::Point(_), EntityKind::Point) => Some(DVec2::new(x[off], x[off + 1])),
         (EntityPoint::Start(_), EntityKind::Line) => Some(DVec2::new(x[off], x[off + 1])),
         (EntityPoint::End(_), EntityKind::Line) => Some(DVec2::new(x[off + 2], x[off + 3])),
         (EntityPoint::Start(_), EntityKind::Arc) => {
@@ -426,6 +427,13 @@ fn evaluate_constraint(
         Constraint::Coincident { a, b } => {
             if let (Some(pa), Some(pb)) = (entity_point(x, layout, a), entity_point(x, layout, b)) {
                 (vec![pa.x - pb.x, pa.y - pb.y], true)
+            } else {
+                (Vec::new(), false)
+            }
+        }
+        Constraint::FixPoint { point, target } => {
+            if let Some(actual) = entity_point(x, layout, point) {
+                (vec![actual.x - target.x, actual.y - target.y], true)
             } else {
                 (Vec::new(), false)
             }
@@ -880,6 +888,23 @@ mod tests {
         let report = solve_sketch(&mut sketch);
 
         assert_eq!(report.status, SolveStatus::Underdefined);
+    }
+
+    #[test]
+    fn fix_point_fully_constrains_single_point() {
+        let mut sketch = new_sketch();
+        let point = sketch.add(SketchEntity::Point {
+            p: dvec2(3.0, -1.0),
+        });
+        sketch.add_constraint(Constraint::FixPoint {
+            point: EntityPoint::Point(point),
+            target: dvec2(3.0, -1.0),
+        });
+
+        let report = solve_sketch(&mut sketch);
+
+        assert_eq!(report.status, SolveStatus::Solved);
+        assert_eq!(report.estimated_free_dofs, 0);
     }
 
     #[test]

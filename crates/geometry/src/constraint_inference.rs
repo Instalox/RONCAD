@@ -73,7 +73,16 @@ pub fn infer_constraints(sketch: &mut Sketch, new_id: SketchEntityId) {
                 });
             }
         }
-        SketchEntity::Point { .. } | SketchEntity::Rectangle { .. } => {}
+        SketchEntity::Point { p } => {
+            let handle = EntityPoint::Point(new_id);
+            if let Some(matched) = find_coincident_handle(sketch, new_id, p) {
+                to_add.push(Constraint::Coincident {
+                    a: handle,
+                    b: matched,
+                });
+            }
+        }
+        SketchEntity::Rectangle { .. } => {}
     }
 
     for c in to_add {
@@ -105,6 +114,7 @@ fn find_coincident_handle(
 
 fn handles_for(id: SketchEntityId, entity: &SketchEntity) -> Vec<EntityPoint> {
     match entity {
+        SketchEntity::Point { .. } => vec![EntityPoint::Point(id)],
         SketchEntity::Line { .. } => vec![EntityPoint::Start(id), EntityPoint::End(id)],
         SketchEntity::Arc { .. } => vec![
             EntityPoint::Start(id),
@@ -112,7 +122,7 @@ fn handles_for(id: SketchEntityId, entity: &SketchEntity) -> Vec<EntityPoint> {
             EntityPoint::Center(id),
         ],
         SketchEntity::Circle { .. } => vec![EntityPoint::Center(id)],
-        SketchEntity::Point { .. } | SketchEntity::Rectangle { .. } => Vec::new(),
+        SketchEntity::Rectangle { .. } => Vec::new(),
     }
 }
 
@@ -225,6 +235,26 @@ mod tests {
                 a: EntityPoint::Center(ca),
                 b: EntityPoint::Start(lb),
             } if *ca == circle && *lb == line
+        )));
+    }
+
+    #[test]
+    fn point_on_existing_endpoint_gets_coincident() {
+        let mut sketch = new_sketch();
+        let line = sketch.add(SketchEntity::Line {
+            a: dvec2(5.0, 5.0),
+            b: dvec2(10.0, 5.0),
+        });
+        let point = sketch.add(SketchEntity::Point { p: dvec2(5.0, 5.0) });
+
+        infer_constraints(&mut sketch, point);
+
+        assert!(sketch.iter_constraints().any(|(_, c)| matches!(
+            c,
+            Constraint::Coincident {
+                a: EntityPoint::Point(pa),
+                b: EntityPoint::Start(lb),
+            } if *pa == point && *lb == line
         )));
     }
 

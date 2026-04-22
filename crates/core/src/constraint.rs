@@ -5,6 +5,7 @@
 //! in core so AppCommand can carry constraint values without pulling in a
 //! geometry dependency.
 
+use glam::DVec2;
 use serde::{Deserialize, Serialize};
 
 use crate::ids::SketchEntityId;
@@ -12,6 +13,8 @@ use crate::ids::SketchEntityId;
 /// Names a well-defined point on a sketch entity.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum EntityPoint {
+    /// Position of a standalone point entity.
+    Point(SketchEntityId),
     /// Start of a line (point `a`) or start of an arc's sweep.
     Start(SketchEntityId),
     /// End of a line (point `b`) or end of an arc's sweep.
@@ -23,7 +26,7 @@ pub enum EntityPoint {
 impl EntityPoint {
     pub fn entity(self) -> SketchEntityId {
         match self {
-            Self::Start(id) | Self::End(id) | Self::Center(id) => id,
+            Self::Point(id) | Self::Start(id) | Self::End(id) | Self::Center(id) => id,
         }
     }
 }
@@ -35,6 +38,8 @@ impl EntityPoint {
 pub enum Constraint {
     /// Two named entity points share a location.
     Coincident { a: EntityPoint, b: EntityPoint },
+    /// A named entity point stays at a fixed location.
+    FixPoint { point: EntityPoint, target: DVec2 },
     /// A named entity point lies on the body of another entity.
     PointOnEntity {
         point: EntityPoint,
@@ -77,6 +82,7 @@ impl Constraint {
     pub fn referenced_entities(&self) -> Vec<SketchEntityId> {
         match self {
             Self::Coincident { a, b } => vec![a.entity(), b.entity()],
+            Self::FixPoint { point, .. } => vec![point.entity()],
             Self::PointOnEntity { point, entity } => vec![point.entity(), *entity],
             Self::Horizontal { entity } | Self::Vertical { entity } => vec![*entity],
             Self::Parallel { a, b }

@@ -153,6 +153,11 @@ pub fn apply(
                 }
             }
         }
+        AppCommand::RemoveConstraint { sketch, constraint } => {
+            if let Some(s) = project.sketches.get_mut(*sketch) {
+                s.remove_constraint(*constraint);
+            }
+        }
         AppCommand::SetLineLength {
             sketch,
             entity,
@@ -376,6 +381,7 @@ fn sketch_target(command: &AppCommand) -> Option<SketchId> {
         | AppCommand::AddArc { sketch, .. }
         | AppCommand::ApplyLineFillet { sketch, .. }
         | AppCommand::AddConstraint { sketch, .. }
+        | AppCommand::RemoveConstraint { sketch, .. }
         | AppCommand::SetLineLength { sketch, .. }
         | AppCommand::SetRectangleWidth { sketch, .. }
         | AppCommand::SetRectangleHeight { sketch, .. }
@@ -821,6 +827,40 @@ mod tests {
                 .len(),
             1
         );
+    }
+
+    #[test]
+    fn remove_constraint_deletes_existing_constraint() {
+        let mut project = Project::new_untitled();
+        let mut selection = Selection::default();
+        let sketch = project.active_sketch.expect("default project has sketch");
+        let entity = project
+            .active_sketch_mut()
+            .expect("active sketch")
+            .add(SketchEntity::Line {
+                a: dvec2(0.0, 0.0),
+                b: dvec2(5.0, 0.0),
+            });
+        let constraint_id = project
+            .active_sketch_mut()
+            .expect("active sketch")
+            .add_constraint(Constraint::Horizontal { entity });
+
+        apply(
+            &mut project,
+            &mut selection,
+            &AppCommand::RemoveConstraint {
+                sketch,
+                constraint: constraint_id,
+            },
+        );
+
+        assert!(project
+            .active_sketch()
+            .expect("active sketch")
+            .iter_constraints()
+            .next()
+            .is_none());
     }
 
     #[test]

@@ -81,6 +81,13 @@ fn paint_constraint(
                 dot_at(painter, camera, center, workplane, point, color);
             }
         }
+        Constraint::FixPoint { point, .. } => {
+            if let Some(world) = resolve_handle(sketch, point) {
+                glyph_at(
+                    painter, camera, center, workplane, world, "Fx", 0, font, color,
+                );
+            }
+        }
         Constraint::PointOnEntity { point, .. } => {
             if let Some(world) = resolve_handle(sketch, point) {
                 ring_at(painter, camera, center, workplane, world, color);

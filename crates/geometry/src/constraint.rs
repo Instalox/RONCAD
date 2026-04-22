@@ -14,6 +14,7 @@ pub use roncad_core::constraint::{Constraint, EntityPoint};
 /// (e.g., asking for `Center` of a line).
 pub fn resolve_entity_point(handle: EntityPoint, entity: &SketchEntity) -> Option<DVec2> {
     match (handle, entity) {
+        (EntityPoint::Point(_), SketchEntity::Point { p }) => Some(*p),
         (EntityPoint::Start(_), SketchEntity::Line { a, .. }) => Some(*a),
         (EntityPoint::End(_), SketchEntity::Line { b, .. }) => Some(*b),
         (

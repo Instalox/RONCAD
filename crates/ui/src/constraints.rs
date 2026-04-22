@@ -1,7 +1,7 @@
 use egui::{Align, Button, Frame, Margin, RichText, Stroke, Ui};
 use egui_phosphor::regular as ph;
 use roncad_core::{
-    constraint::Constraint,
+    constraint::{Constraint, EntityPoint},
     ids::{ConstraintId, SketchEntityId, SketchId},
     selection::{Selection, SelectionItem},
 };
@@ -144,7 +144,15 @@ pub fn render_constraints_section(
             |ui| {
                 for (index, diagnostic) in diagnostics.iter().take(PREVIEW_ROW_LIMIT).enumerate() {
                     ui.push_id(("constraint_problem_row", index), |ui| {
-                        constraint_row(ui, sketch, &diagnostic.constraint, Some(diagnostic));
+                        constraint_row(
+                            ui,
+                            response,
+                            sketch_id,
+                            diagnostic.id,
+                            sketch,
+                            &diagnostic.constraint,
+                            Some(diagnostic),
+                        );
                     });
                 }
             },
@@ -166,6 +174,9 @@ pub fn render_constraints_section(
                 ui.push_id(("constraint_row", index), |ui| {
                     constraint_row(
                         ui,
+                        response,
+                        sketch_id,
+                        constraint_id,
                         sketch,
                         constraint,
                         diagnostic_for_constraint(shell.last_solve_report, constraint_id),
@@ -215,7 +226,17 @@ fn suggested_constraint_actions(
 
 fn single_entity_actions(sketch: &Sketch, entity_id: SketchEntityId) -> Vec<ConstraintAction> {
     match sketch.entities.get(entity_id) {
-        Some(SketchEntity::Line { .. }) => vec![
+        Some(SketchEntity::Point { p }) => vec![make_action(
+            sketch,
+            "Fix Point",
+            "Fx",
+            "Lock selected point in place",
+            Constraint::FixPoint {
+                point: EntityPoint::Point(entity_id),
+                target: *p,
+            },
+        )],
+        Some(SketchEntity::Line { a, b }) => vec![
             make_action(
                 sketch,
                 "Horizontal",
@@ -230,7 +251,39 @@ fn single_entity_actions(sketch: &Sketch, entity_id: SketchEntityId) -> Vec<Cons
                 "Constrain selected line vertical",
                 Constraint::Vertical { entity: entity_id },
             ),
+            make_action(
+                sketch,
+                "Fix Start",
+                "Fx",
+                "Lock the line start point in place",
+                Constraint::FixPoint {
+                    point: EntityPoint::Start(entity_id),
+                    target: *a,
+                },
+            ),
+            make_action(
+                sketch,
+                "Fix End",
+                "Fx",
+                "Lock the line end point in place",
+                Constraint::FixPoint {
+                    point: EntityPoint::End(entity_id),
+                    target: *b,
+                },
+            ),
         ],
+        Some(SketchEntity::Circle { center, .. } | SketchEntity::Arc { center, .. }) => {
+            vec![make_action(
+                sketch,
+                "Fix Center",
+                "Fx",
+                "Lock the selected center point in place",
+                Constraint::FixPoint {
+                    point: EntityPoint::Center(entity_id),
+                    target: *center,
+                },
+            )]
+        }
         _ => Vec::new(),
     }
 }
@@ -412,6 +465,9 @@ fn stat_row(ui: &mut Ui, label: &str, value: &str, color: egui::Color32) {
 
 fn constraint_row(
     ui: &mut Ui,
+    response: &mut ShellResponse,
+    sketch_id: SketchId,
+    constraint_id: ConstraintId,
     sketch: &Sketch,
     constraint: &Constraint,
     diagnostic: Option<&ConstraintDiagnostic>,
@@ -441,6 +497,22 @@ fn constraint_row(
                         .color(ThemeColors::TEXT),
                 );
                 ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
+                    let delete = ui
+                        .add(
+                            Button::new(RichText::new(ph::TRASH).size(10.5))
+                                .frame(false)
+                                .small(),
+                        )
+                        .on_hover_text("Delete constraint");
+                    if delete.clicked() {
+                        response.commands.push(
+                            roncad_core::command::AppCommand::RemoveConstraint {
+                                sketch: sketch_id,
+                                constraint: constraint_id,
+                            },
+                        );
+                    }
+                    ui.add_space(6.0);
                     if let Some(diagnostic) = diagnostic {
                         ui.colored_label(
                             accent,
@@ -511,7 +583,7 @@ fn selected_sketch_entities(selection: &Selection, sketch_id: SketchId) -> Vec<S
 fn selection_hint(selection_len: usize) -> &'static str {
     match selection_len {
         0 => "Select geometry to add explicit relations.",
-        1 => "Select one line for Horizontal or Vertical.",
+        1 => "Select one entity to fix a point or center, or one line for line constraints.",
         2 => "Select two lines, two curves, or a line and a curve.",
         _ => "Reduce selection to one or two sketch entities.",
     }
@@ -567,6 +639,7 @@ fn constraint_problem_label(kind: ConstraintDiagnosticKind) -> &'static str {
 fn constraint_label(constraint: &Constraint) -> &'static str {
     match constraint {
         Constraint::Coincident { .. } => "Coincident",
+        Constraint::FixPoint { .. } => "Fixed Point",
         Constraint::PointOnEntity { .. } => "Point On Entity",
         Constraint::Horizontal { .. } => "Horizontal",
         Constraint::Vertical { .. } => "Vertical",
@@ -581,6 +654,7 @@ fn constraint_label(constraint: &Constraint) -> &'static str {
 fn constraint_glyph(constraint: &Constraint) -> &'static str {
     match constraint {
         Constraint::Coincident { .. } => "o",
+        Constraint::FixPoint { .. } => "Fx",
         Constraint::PointOnEntity { .. } => "O",
         Constraint::Horizontal { .. } => "H",
         Constraint::Vertical { .. } => "V",
@@ -598,6 +672,12 @@ fn constraint_targets(sketch: &Sketch, constraint: &Constraint) -> String {
             "{} · {}",
             entity_tag(a.entity(), sketch),
             entity_tag(b.entity(), sketch)
+        ),
+        Constraint::FixPoint { point, target } => format!(
+            "{} @ {:.2},{:.2}",
+            entity_tag(point.entity(), sketch),
+            target.x,
+            target.y
         ),
         Constraint::PointOnEntity { point, entity } => format!(
             "{} · {}",
@@ -645,7 +725,7 @@ fn entity_slot(entity_id: SketchEntityId) -> u32 {
 mod tests {
     use glam::dvec2;
     use roncad_core::selection::{Selection, SelectionItem};
-    use roncad_geometry::{Constraint, Project, SketchEntity};
+    use roncad_geometry::{Constraint, EntityPoint, Project, SketchEntity};
 
     use super::{selected_sketch_entities, suggested_constraint_actions};
 
@@ -661,12 +741,37 @@ mod tests {
 
         let actions = suggested_constraint_actions(sketch, &[line]);
 
-        assert_eq!(actions.len(), 2);
+        assert_eq!(actions.len(), 4);
         assert!(actions
             .iter()
             .any(|action| matches!(action.constraint, Constraint::Horizontal { entity } if entity == line)));
         assert!(actions.iter().any(
             |action| matches!(action.constraint, Constraint::Vertical { entity } if entity == line)
+        ));
+        assert!(actions
+            .iter()
+            .any(|action| matches!(action.constraint, Constraint::FixPoint { point: EntityPoint::Start(entity), .. } if entity == line)));
+        assert!(actions
+            .iter()
+            .any(|action| matches!(action.constraint, Constraint::FixPoint { point: EntityPoint::End(entity), .. } if entity == line)));
+    }
+
+    #[test]
+    fn single_point_suggests_fix_point() {
+        let mut project = Project::new_untitled();
+        let sketch_id = project.active_sketch.expect("sketch");
+        let sketch = project.sketches.get_mut(sketch_id).expect("sketch");
+        let point = sketch.add(SketchEntity::Point { p: dvec2(3.0, 4.0) });
+
+        let actions = suggested_constraint_actions(sketch, &[point]);
+
+        assert_eq!(actions.len(), 1);
+        assert!(matches!(
+            actions[0].constraint,
+            Constraint::FixPoint {
+                point: EntityPoint::Point(entity),
+                target
+            } if entity == point && target == dvec2(3.0, 4.0)
         ));
     }
 
