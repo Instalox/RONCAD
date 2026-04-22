@@ -20,8 +20,8 @@ const TOOLS: &[ActiveToolKind] = &[
     ActiveToolKind::Circle,
     ActiveToolKind::Arc,
     ActiveToolKind::Fillet,
-    ActiveToolKind::Dimension,
     ActiveToolKind::Extrude,
+    ActiveToolKind::Revolve,
 ];
 
 #[derive(Debug, Default)]
@@ -488,6 +488,7 @@ fn tool_glyph(tool: ActiveToolKind) -> &'static str {
         ActiveToolKind::Fillet => "F",
         ActiveToolKind::Dimension => ph::RULER,
         ActiveToolKind::Extrude => ph::ARROW_FAT_LINE_UP,
+        ActiveToolKind::Revolve => ph::ARROWS_CLOCKWISE,
     }
 }
 
@@ -502,6 +503,7 @@ fn tool_palette_detail(tool: ActiveToolKind) -> Option<&'static str> {
         ActiveToolKind::Fillet => Some("Round a sketch corner"),
         ActiveToolKind::Dimension => Some("Place a distance dimension"),
         ActiveToolKind::Extrude => Some("Preview closed profiles"),
+        ActiveToolKind::Revolve => Some("Revolve profile around axis"),
     }
 }
 

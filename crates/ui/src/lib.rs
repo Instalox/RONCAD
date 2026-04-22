@@ -6,9 +6,11 @@ mod constraints;
 mod dimensions;
 mod extrude_state;
 mod hud_state;
+mod revolve_state;
 
 pub use command_palette::CommandPaletteState;
 pub use extrude_state::ExtrudeHudState;
+pub use revolve_state::RevolveHudState;
 pub mod inspector;
 pub mod project_tree;
 pub mod right_sidebar;

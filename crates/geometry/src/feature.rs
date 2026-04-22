@@ -6,30 +6,35 @@ use crate::SketchProfile;
 #[derive(Debug, Clone, PartialEq)]
 pub enum Feature {
     Extrude(ExtrudeFeature),
+    Revolve(RevolveFeature),
 }
 
 impl Feature {
     pub fn kind_name(&self) -> &'static str {
         match self {
             Self::Extrude(_) => "Extrude",
+            Self::Revolve(_) => "Revolve",
         }
     }
 
     pub fn name(&self) -> &str {
         match self {
             Self::Extrude(feature) => &feature.name,
+            Self::Revolve(feature) => &feature.name,
         }
     }
 
     pub fn body(&self) -> BodyId {
         match self {
             Self::Extrude(feature) => feature.body,
+            Self::Revolve(feature) => feature.body,
         }
     }
 
     pub fn source_sketch(&self) -> Option<SketchId> {
         match self {
             Self::Extrude(feature) => feature.source_sketch,
+            Self::Revolve(feature) => feature.source_sketch,
         }
     }
 
@@ -38,19 +43,24 @@ impl Feature {
             Self::Extrude(feature) if feature.source_sketch == Some(sketch) => {
                 feature.source_sketch = None;
             }
-            Self::Extrude(_) => {}
+            Self::Revolve(feature) if feature.source_sketch == Some(sketch) => {
+                feature.source_sketch = None;
+            }
+            Self::Extrude(_) | Self::Revolve(_) => {}
         }
     }
 
     pub fn profile(&self) -> &SketchProfile {
         match self {
             Self::Extrude(feature) => &feature.profile,
+            Self::Revolve(feature) => &feature.profile,
         }
     }
 
     pub fn distance_mm(&self) -> f64 {
         match self {
             Self::Extrude(feature) => feature.distance_mm,
+            Self::Revolve(_) => 0.0,
         }
     }
 
@@ -59,17 +69,59 @@ impl Feature {
     }
 
     pub fn volume_mm3(&self) -> f64 {
-        self.area_mm2() * self.distance_mm().abs()
+        match self {
+            Self::Extrude(feature) => self.area_mm2() * feature.distance_mm.abs(),
+            Self::Revolve(feature) => {
+                // Pappus's centroid theorem: V = A * 2*pi*r, where r is distance from centroid to axis
+                // This is an approximation if the axis intersects the profile, but fine for now
+                let centroid = self.profile().centroid();
+                // Find distance from centroid to the axis line (axis_origin, axis_dir)
+                let to_centroid = centroid - feature.axis_origin;
+                // cross product in 2d gives distance to line if direction is normalized
+                let r = (to_centroid.x * feature.axis_dir.y - to_centroid.y * feature.axis_dir.x).abs();
+                self.area_mm2() * feature.angle_rad.abs() * r
+            }
+        }
     }
 
     pub fn bounds_3d(&self) -> (DVec3, DVec3) {
-        let (min_2d, max_2d) = profile_bounds(self.profile());
-        let min_z = self.distance_mm().min(0.0);
-        let max_z = self.distance_mm().max(0.0);
-        (
-            DVec3::new(min_2d.x, min_2d.y, min_z),
-            DVec3::new(max_2d.x, max_2d.y, max_z),
-        )
+        match self {
+            Self::Extrude(feature) => {
+                let (min_2d, max_2d) = profile_bounds(self.profile());
+                let min_z = feature.distance_mm.min(0.0);
+                let max_z = feature.distance_mm.max(0.0);
+                (
+                    DVec3::new(min_2d.x, min_2d.y, min_z),
+                    DVec3::new(max_2d.x, max_2d.y, max_z),
+                )
+            }
+            Self::Revolve(feature) => {
+                // Simple conservative bounding box
+                let (min_2d, max_2d) = profile_bounds(self.profile());
+                // Find max radius from axis origin to any point in the bounding box
+                let corners = [
+                    min_2d,
+                    DVec2::new(max_2d.x, min_2d.y),
+                    max_2d,
+                    DVec2::new(min_2d.x, max_2d.y),
+                ];
+                let mut max_r = 0.0_f64;
+                for corner in corners {
+                    let to_corner = corner - feature.axis_origin;
+                    let r = (to_corner.x * feature.axis_dir.y - to_corner.y * feature.axis_dir.x).abs();
+                    max_r = max_r.max(r);
+                }
+                
+                // For a full revolve, the shape sweeps through space.
+                // A conservative bound is a cylinder along the axis.
+                // Assuming axis is in the XY plane.
+                let max_coord = max_r + min_2d.abs().max(max_2d.abs()).length();
+                (
+                    DVec3::new(-max_coord, -max_coord, -max_r),
+                    DVec3::new(max_coord, max_coord, max_r),
+                )
+            }
+        }
     }
 }
 
@@ -96,6 +148,39 @@ impl ExtrudeFeature {
             source_sketch,
             profile,
             distance_mm,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct RevolveFeature {
+    pub name: String,
+    pub body: BodyId,
+    pub source_sketch: Option<SketchId>,
+    pub profile: SketchProfile,
+    pub axis_origin: DVec2,
+    pub axis_dir: DVec2,
+    pub angle_rad: f64,
+}
+
+impl RevolveFeature {
+    pub fn new(
+        name: impl Into<String>,
+        body: BodyId,
+        source_sketch: Option<SketchId>,
+        profile: SketchProfile,
+        axis_origin: DVec2,
+        axis_dir: DVec2,
+        angle_rad: f64,
+    ) -> Self {
+        Self {
+            name: name.into(),
+            body,
+            source_sketch,
+            profile,
+            axis_origin,
+            axis_dir,
+            angle_rad,
         }
     }
 }

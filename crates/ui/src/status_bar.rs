@@ -153,6 +153,7 @@ fn status_hint(kind: ActiveToolKind, dynamic_active: bool) -> &'static str {
         ActiveToolKind::Fillet => "Pick corner, then radius",
         ActiveToolKind::Dimension => "Pick points to dimension",
         ActiveToolKind::Extrude => "Click a closed profile",
+        ActiveToolKind::Revolve => "Click a closed profile",
     }
 }
 

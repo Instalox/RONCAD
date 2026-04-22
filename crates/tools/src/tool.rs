@@ -19,6 +19,7 @@ pub enum ActiveToolKind {
     Fillet,
     Dimension,
     Extrude,
+    Revolve,
 }
 
 impl ActiveToolKind {
@@ -33,6 +34,7 @@ impl ActiveToolKind {
             Self::Fillet => "Fillet",
             Self::Dimension => "Dimension",
             Self::Extrude => "Extrude",
+            Self::Revolve => "Revolve",
         }
     }
 
@@ -51,6 +53,7 @@ impl ActiveToolKind {
             }
             Self::Dimension => "Pick two points to dimension. Right-click or Esc clears.",
             Self::Extrude => "Hover a closed profile to preview extrusion target.",
+            Self::Revolve => "Select a closed profile, then select an axis line to revolve around.",
         }
     }
 
@@ -65,6 +68,7 @@ impl ActiveToolKind {
             Self::Fillet => Some("F"),
             Self::Dimension => Some("D"),
             Self::Extrude => Some("E"),
+            Self::Revolve => None, // Or give it a shortcut later
         }
     }
 }

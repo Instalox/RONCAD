@@ -327,6 +327,20 @@ pub fn apply(project: &mut Project, selection: &mut Selection, command: &AppComm
                 selection.insert(SelectionItem::Body(body));
             }
         }
+        AppCommand::RevolveProfile {
+            sketch,
+            profile,
+            axis_origin,
+            axis_dir,
+            angle_rad,
+        } => {
+            if let Some((body, _feature)) =
+                project.revolve_profile(*sketch, sketch_profile(profile), *axis_origin, *axis_dir, *angle_rad)
+            {
+                selection.clear();
+                selection.insert(SelectionItem::Body(body));
+            }
+        }
         AppCommand::NoOp => {}
     }
 }

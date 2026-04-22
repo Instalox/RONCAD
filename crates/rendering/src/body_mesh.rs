@@ -51,23 +51,23 @@ pub struct MeshEdge3d {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct ExtrudeMesh3d {
+pub struct FeatureMesh3d {
     pub triangles: Vec<MeshTriangle3d>,
     pub edges: Vec<MeshEdge3d>,
 }
 
 // Legacy compat: keep the old name available internally for the outline_edges
 // field consumers that destructure. The public API is `edges` now.
-impl ExtrudeMesh3d {
+impl FeatureMesh3d {
     pub fn outline_edge_pairs(&self) -> Vec<(DVec3, DVec3)> {
         self.edges.iter().map(|e| (e.start, e.end)).collect()
     }
 }
 
-pub fn extrude_mesh(profile: &SketchProfile, distance_mm: f64) -> ExtrudeMesh3d {
+pub fn extrude_mesh(profile: &SketchProfile, distance_mm: f64) -> FeatureMesh3d {
     let (outline_2d, is_smooth_profile) = profile_outline_with_kind(profile);
     if outline_2d.len() < 3 {
-        return ExtrudeMesh3d {
+        return FeatureMesh3d {
             triangles: Vec::new(),
             edges: Vec::new(),
         };
@@ -225,7 +225,229 @@ pub fn extrude_mesh(profile: &SketchProfile, distance_mm: f64) -> ExtrudeMesh3d 
         }
     }
 
-    ExtrudeMesh3d { triangles, edges }
+    FeatureMesh3d { triangles, edges }
+}
+
+pub fn revolve_mesh(
+    profile: &SketchProfile,
+    axis_origin: DVec2,
+    axis_dir: DVec2,
+    angle_rad: f64,
+) -> FeatureMesh3d {
+    let (outline_2d, is_smooth_profile) = profile_outline_with_kind(profile);
+    if outline_2d.len() < 3 || angle_rad.abs() < PROFILE_EPSILON {
+        return FeatureMesh3d {
+            triangles: Vec::new(),
+            edges: Vec::new(),
+        };
+    }
+
+    let mut triangles = Vec::new();
+    let mut edges = Vec::new();
+
+    let segments = ((angle_rad.abs() / std::f64::consts::TAU) * CIRCLE_SEGMENTS_MAX as f64).ceil() as usize;
+    let segments = segments.clamp(4, CIRCLE_SEGMENTS_MAX);
+    let d_theta = angle_rad / segments as f64;
+
+    let e1 = axis_dir;
+    let e2 = DVec2::new(-axis_dir.y, axis_dir.x);
+
+    let revolve_point = |p: DVec2, theta: f64| -> DVec3 {
+        let p_rel = p - axis_origin;
+        let u = p_rel.dot(e1);
+        let v = p_rel.dot(e2);
+        
+        let base = axis_origin + u * e1;
+        let p_3d = DVec3::new(base.x, base.y, 0.0);
+        let e2_3d = DVec3::new(e2.x, e2.y, 0.0);
+        let e3_3d = DVec3::Z;
+        
+        p_3d + v * theta.cos() * e2_3d + v * theta.sin() * e3_3d
+    };
+
+    let revolve_normal = |n_2d: DVec2, theta: f64| -> DVec3 {
+        let u = n_2d.dot(e1);
+        let v = n_2d.dot(e2);
+        let e2_3d = DVec3::new(e2.x, e2.y, 0.0);
+        let e3_3d = DVec3::Z;
+        
+        DVec3::new(e1.x, e1.y, 0.0) * u + v * theta.cos() * e2_3d + v * theta.sin() * e3_3d
+    };
+
+    let signed_area = signed_polygon_area(&outline_2d);
+    let centroid_2d = polygon_centroid(&outline_2d);
+
+    let smooth_normals: Option<Vec<DVec2>> = if is_smooth_profile {
+        Some(
+            outline_2d
+                .iter()
+                .map(|p| {
+                    let radial = *p - centroid_2d;
+                    let len = radial.length();
+                    if len > PROFILE_EPSILON {
+                        radial / len
+                    } else {
+                        DVec2::X
+                    }
+                })
+                .collect(),
+        )
+    } else {
+        None
+    };
+
+    // --- Start and End Caps ---
+    let is_full_revolution = (angle_rad.abs() - std::f64::consts::TAU).abs() < PROFILE_EPSILON;
+    if !is_full_revolution {
+        let start_points: Vec<_> = outline_2d.iter().map(|p| revolve_point(*p, 0.0)).collect();
+        let end_points: Vec<_> = outline_2d.iter().map(|p| revolve_point(*p, angle_rad)).collect();
+        
+        let start_normal = if angle_rad >= 0.0 {
+            DVec3::new(e2.x, e2.y, 0.0)
+        } else {
+            DVec3::new(-e2.x, -e2.y, 0.0)
+        };
+        let end_normal = revolve_normal(if angle_rad >= 0.0 { -e2 } else { e2 }, angle_rad);
+
+        for [a, b, c] in triangulate_polygon(&outline_2d) {
+            push_flat_triangle(&mut triangles, [start_points[a], start_points[b], start_points[c]], start_normal);
+            push_flat_triangle(&mut triangles, [end_points[a], end_points[b], end_points[c]], end_normal);
+        }
+    }
+
+    // --- Revolved Sides ---
+    let n = outline_2d.len();
+    for i in 0..segments {
+        let theta0 = i as f64 * d_theta;
+        let theta1 = (i + 1) as f64 * d_theta;
+
+        for index in 0..n {
+            let next = (index + 1) % n;
+            
+            let p0_0 = revolve_point(outline_2d[index], theta0);
+            let p1_0 = revolve_point(outline_2d[next], theta0);
+            let p1_1 = revolve_point(outline_2d[next], theta1);
+            let p0_1 = revolve_point(outline_2d[index], theta1);
+
+            if let Some(normals) = &smooth_normals {
+                let n0_0 = revolve_normal(normals[index], theta0);
+                let n1_0 = revolve_normal(normals[next], theta0);
+                let n0_1 = revolve_normal(normals[index], theta1);
+                let n1_1 = revolve_normal(normals[next], theta1);
+
+                let edge = outline_2d[next] - outline_2d[index];
+                let outward_2d = if signed_area >= 0.0 {
+                    DVec2::new(edge.y, -edge.x)
+                } else {
+                    DVec2::new(-edge.y, edge.x)
+                };
+                let outward_3d = revolve_normal(outward_2d, theta0);
+
+                // For revolve, the quad vertices are p0_0, p1_0, p1_1, p0_1 (bl, br, tr, tl)
+                // We need 4 normals
+                let geometric = (p1_0 - p0_0).cross(p1_1 - p0_0);
+                let flip = outward_3d.length_squared() > PROFILE_EPSILON * PROFILE_EPSILON
+                    && geometric.dot(outward_3d) < 0.0;
+
+                if flip {
+                    triangles.push(MeshTriangle3d {
+                        vertices: [
+                            MeshVertex3d { position: p0_0, normal: n0_0 },
+                            MeshVertex3d { position: p1_1, normal: n1_1 },
+                            MeshVertex3d { position: p1_0, normal: n1_0 },
+                        ],
+                    });
+                    triangles.push(MeshTriangle3d {
+                        vertices: [
+                            MeshVertex3d { position: p0_0, normal: n0_0 },
+                            MeshVertex3d { position: p0_1, normal: n0_1 },
+                            MeshVertex3d { position: p1_1, normal: n1_1 },
+                        ],
+                    });
+                } else {
+                    triangles.push(MeshTriangle3d {
+                        vertices: [
+                            MeshVertex3d { position: p0_0, normal: n0_0 },
+                            MeshVertex3d { position: p1_0, normal: n1_0 },
+                            MeshVertex3d { position: p1_1, normal: n1_1 },
+                        ],
+                    });
+                    triangles.push(MeshTriangle3d {
+                        vertices: [
+                            MeshVertex3d { position: p0_0, normal: n0_0 },
+                            MeshVertex3d { position: p1_1, normal: n1_1 },
+                            MeshVertex3d { position: p0_1, normal: n0_1 },
+                        ],
+                    });
+                }
+            } else {
+                let edge = outline_2d[next] - outline_2d[index];
+                let outward_2d = if signed_area >= 0.0 {
+                    DVec2::new(edge.y, -edge.x)
+                } else {
+                    DVec2::new(-edge.y, edge.x)
+                };
+                let outward_3d = revolve_normal(outward_2d, (theta0 + theta1) * 0.5);
+
+                push_flat_triangle(&mut triangles, [p0_0, p1_0, p1_1], outward_3d);
+                push_flat_triangle(&mut triangles, [p0_0, p1_1, p0_1], outward_3d);
+            }
+        }
+    }
+
+    // --- Edges ---
+    let edge_kind_for_outline = if is_smooth_profile {
+        EdgeKind::Border
+    } else {
+        EdgeKind::Crease
+    };
+
+    // Draw the start and end profiles
+    if !is_full_revolution {
+        for index in 0..n {
+            let next = (index + 1) % n;
+            edges.push(MeshEdge3d {
+                start: revolve_point(outline_2d[index], 0.0),
+                end: revolve_point(outline_2d[next], 0.0),
+                kind: edge_kind_for_outline,
+            });
+            edges.push(MeshEdge3d {
+                start: revolve_point(outline_2d[index], angle_rad),
+                end: revolve_point(outline_2d[next], angle_rad),
+                kind: edge_kind_for_outline,
+            });
+        }
+    }
+
+    // Draw the latitudinal edges
+    if !is_smooth_profile {
+        for i in 1..segments {
+            let theta = i as f64 * d_theta;
+            for index in 0..n {
+                let next = (index + 1) % n;
+                edges.push(MeshEdge3d {
+                    start: revolve_point(outline_2d[index], theta),
+                    end: revolve_point(outline_2d[next], theta),
+                    kind: EdgeKind::Border, // Latitudinal lines are just borders, not hard creases
+                });
+            }
+        }
+    }
+
+    // Draw the longitudinal edges (connectors)
+    for index in connector_indices(profile, n) {
+        for i in 0..segments {
+            let theta0 = i as f64 * d_theta;
+            let theta1 = (i + 1) as f64 * d_theta;
+            edges.push(MeshEdge3d {
+                start: revolve_point(outline_2d[index], theta0),
+                end: revolve_point(outline_2d[index], theta1),
+                kind: edge_kind_for_outline,
+            });
+        }
+    }
+
+    FeatureMesh3d { triangles, edges }
 }
 
 fn push_flat_triangle(

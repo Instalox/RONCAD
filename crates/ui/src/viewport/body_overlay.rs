@@ -6,7 +6,7 @@ use egui::{Color32, Pos2, Rect, Shape, Stroke};
 use glam::DVec3;
 use roncad_core::selection::{Selection, SelectionItem};
 use roncad_geometry::Project;
-use roncad_rendering::{extrude_mesh, Camera2d, EdgeKind};
+use roncad_rendering::{extrude_mesh, revolve_mesh, Camera2d, EdgeKind};
 
 use super::{screen_center, to_pos};
 use crate::theme::ThemeColors;
@@ -43,7 +43,10 @@ pub(super) fn paint(
             else {
                 continue;
             };
-            let mesh = extrude_mesh(feature.profile(), feature.distance_mm());
+            let mesh = match feature {
+                roncad_geometry::Feature::Extrude(f) => extrude_mesh(&f.profile, f.distance_mm),
+                roncad_geometry::Feature::Revolve(f) => revolve_mesh(&f.profile, f.axis_origin, f.axis_dir, f.angle_rad),
+            };
 
             for triangle in mesh.triangles {
                 let positions = triangle

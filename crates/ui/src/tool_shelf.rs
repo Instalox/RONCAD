@@ -16,8 +16,8 @@ const TOOLS: &[ActiveToolKind] = &[
     ActiveToolKind::Circle,
     ActiveToolKind::Arc,
     ActiveToolKind::Fillet,
-    ActiveToolKind::Dimension,
     ActiveToolKind::Extrude,
+    ActiveToolKind::Revolve,
 ];
 
 pub fn render(ui: &mut Ui, shell: &mut ShellContext<'_>, _response: &mut ShellResponse) {
@@ -87,6 +87,7 @@ fn tool_glyph(tool: ActiveToolKind) -> &'static str {
         ActiveToolKind::Fillet => "F",
         ActiveToolKind::Dimension => ph::RULER,
         ActiveToolKind::Extrude => ph::ARROW_FAT_LINE_UP,
+        ActiveToolKind::Revolve => ph::ARROWS_CLOCKWISE,
     }
 }
 

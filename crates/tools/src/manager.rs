@@ -151,7 +151,7 @@ fn make_tool(kind: ActiveToolKind) -> Box<dyn Tool> {
         ActiveToolKind::Arc => Box::new(ArcTool::default()),
         ActiveToolKind::Fillet => Box::new(FilletTool::default()),
         ActiveToolKind::Dimension => Box::new(DimensionTool::default()),
-        ActiveToolKind::Extrude => Box::new(PassiveTool(kind)),
+        ActiveToolKind::Extrude | ActiveToolKind::Revolve => Box::new(PassiveTool(kind)),
     }
 }
 

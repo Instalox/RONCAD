@@ -116,6 +116,13 @@ pub enum AppCommand {
         profile: ProfileRegion,
         distance: LengthMm,
     },
+    RevolveProfile {
+        sketch: SketchId,
+        profile: ProfileRegion,
+        axis_origin: DVec2,
+        axis_dir: DVec2,
+        angle_rad: f64,
+    },
     NoOp,
 }
 

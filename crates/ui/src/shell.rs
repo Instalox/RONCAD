@@ -14,7 +14,7 @@ use crate::{
     viewport::{self, ViewportInteractionHandler},
     CommandPaletteState,
 };
-use crate::{ExtrudeHudState, HudEditState};
+use crate::{ExtrudeHudState, HudEditState, RevolveHudState};
 
 pub struct ShellContext<'a> {
     pub tool_manager: &'a mut ToolManager,
@@ -28,6 +28,7 @@ pub struct ShellContext<'a> {
     pub command_palette: &'a mut CommandPaletteState,
     pub extrude_hud: &'a mut ExtrudeHudState,
     pub new_sketch_plane: &'a mut Option<WorkplaneId>,
+    pub revolve_hud: &'a mut RevolveHudState,
 }
 
 #[derive(Default)]

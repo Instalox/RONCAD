@@ -5,7 +5,7 @@ use roncad_core::ids::{BodyId, FeatureId, SketchId, WorkplaneId};
 use slotmap::SlotMap;
 
 use crate::body::Body;
-use crate::feature::{ExtrudeFeature, Feature};
+use crate::feature::{ExtrudeFeature, Feature, RevolveFeature};
 use crate::sketch::Sketch;
 use crate::workplane::Workplane;
 use crate::SketchProfile;
@@ -91,7 +91,7 @@ impl Project {
         }
 
         let body_name = self.allocate_body_name();
-        let feature_name = self.allocate_feature_name();
+        let feature_name = self.allocate_feature_name("Extrude");
         let body_id = self.bodies.insert(Body::new(body_name));
         let feature_id = self.features.insert(Feature::Extrude(ExtrudeFeature::new(
             feature_name,
@@ -99,6 +99,34 @@ impl Project {
             Some(sketch),
             profile,
             distance_mm,
+        )));
+        self.bodies.get_mut(body_id)?.push_feature(feature_id);
+        Some((body_id, feature_id))
+    }
+
+    pub fn revolve_profile(
+        &mut self,
+        sketch: SketchId,
+        profile: SketchProfile,
+        axis_origin: glam::DVec2,
+        axis_dir: glam::DVec2,
+        angle_rad: f64,
+    ) -> Option<(BodyId, FeatureId)> {
+        if !self.sketches.contains_key(sketch) || axis_dir.length_squared() < 1e-6 || angle_rad == 0.0 {
+            return None;
+        }
+
+        let body_name = self.allocate_body_name();
+        let feature_name = self.allocate_feature_name("Revolve");
+        let body_id = self.bodies.insert(Body::new(body_name));
+        let feature_id = self.features.insert(Feature::Revolve(RevolveFeature::new(
+            feature_name,
+            body_id,
+            Some(sketch),
+            profile,
+            axis_origin,
+            axis_dir.normalize(),
+            angle_rad,
         )));
         self.bodies.get_mut(body_id)?.push_feature(feature_id);
         Some((body_id, feature_id))
@@ -149,8 +177,8 @@ impl Project {
         name
     }
 
-    fn allocate_feature_name(&mut self) -> String {
-        let name = format!("Extrude {}", self.next_feature_serial);
+    fn allocate_feature_name(&mut self, prefix: &str) -> String {
+        let name = format!("{} {}", prefix, self.next_feature_serial);
         self.next_feature_serial += 1;
         name
     }

@@ -20,7 +20,9 @@ pub(super) fn paint(
     let max_width = (rect.width() - HUD_PAD_X * 2.0).max(160.0);
     let hover_text = dimensions::hovered_target_summary(shell.project, hovered_target);
     let step_text = if kind == ActiveToolKind::Extrude && shell.extrude_hud.is_open() {
-        "Set a distance, then apply the extrusion.".to_string()
+        shell.tool_manager.step_hint()
+    } else if kind == ActiveToolKind::Revolve && shell.revolve_hud.is_open() {
+        shell.tool_manager.step_hint()
     } else {
         shell.tool_manager.step_hint()
     };
@@ -63,7 +65,7 @@ pub(super) fn paint(
                                         hud_segment(ui, key, label);
                                     }
 
-                                    if kind == ActiveToolKind::Extrude
+                                    if kind == ActiveToolKind::Extrude || kind == ActiveToolKind::Revolve
                                         && shell.extrude_hud.is_open()
                                     {
                                         hud_sep(ui);
@@ -96,6 +98,7 @@ fn modifier_hint(kind: ActiveToolKind) -> Option<(&'static str, &'static str)> {
         ActiveToolKind::Rectangle => Some(("Shift", "square")),
         ActiveToolKind::Select => Some(("Ctrl", "add")),
         ActiveToolKind::Extrude => Some(("Enter", "apply")),
+        ActiveToolKind::Revolve => Some(("Enter", "apply")),
         _ => None,
     }
 }
