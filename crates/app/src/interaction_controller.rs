@@ -157,7 +157,7 @@ pub fn handle_viewport_interaction(
         let scroll = ui.ctx().input(|input| input.smooth_scroll_delta.y);
         if scroll.abs() > f32::EPSILON {
             if let Some(pointer) = resp.hover_pos() {
-                let factor = (scroll as f64 * 0.0025).exp();
+                let factor = (1.0 + scroll as f64 * 0.001).clamp(0.5, 2.0);
                 if let Some(workplane) = active_workplane(shell).cloned() {
                     shell.camera.zoom_about_workplane(
                         pos_to_dvec(pointer),
@@ -176,6 +176,12 @@ pub fn handle_viewport_interaction(
 
     if !palette_open {
         handle_numpad_navigation(ui, shell, response);
+    }
+
+    // Drive camera animation (smooth view transitions)
+    let dt = ui.ctx().input(|input| input.stable_dt) as f64;
+    if shell.camera.animate_step(dt) {
+        ui.ctx().request_repaint();
     }
 
     ViewportInteractionState { hovered_target }

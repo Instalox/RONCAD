@@ -1,7 +1,7 @@
 //! 3D Navigation Gizmo overlay (View Cube).
 //! Placed in the top-right corner to show camera orientation and allow snapping to standard views.
 
-use egui::{Pos2, Rect, Shape, Stroke, StrokeKind, Ui, Vec2};
+use egui::{Color32, Pos2, Rect, Shape, Stroke, StrokeKind, Ui, Vec2};
 use glam::DVec3;
 use std::f64::consts::{FRAC_PI_2, PI};
 
@@ -145,7 +145,7 @@ pub(super) fn paint(
     let pointer_pos = interact.hover_pos();
     let mut hovered_face = None;
 
-    for (face, _) in visible_faces {
+    for (face, dot) in visible_faces {
         let mut screen_corners = Vec::with_capacity(4);
         for corner in face.corners {
             let x = corner.dot(right) as f32;
@@ -163,10 +163,14 @@ pub(super) fn paint(
             hovered_face = Some(face);
         }
 
+        // Depth shading: faces more directly facing the camera are brighter
+        let depth_factor = (-dot).clamp(0.0, 1.0) as f32; // 0..1, 1 = facing camera
+        let brightness = 0.6 + 0.4 * depth_factor;
+
         let fill_color = if is_hovered {
             ThemeColors::BG_HOVER
         } else {
-            ThemeColors::BG_PANEL_ALT_GLASS
+            darken_color(ThemeColors::BG_PANEL_ALT_GLASS, brightness)
         };
 
         let stroke_color = if is_hovered {
@@ -185,14 +189,17 @@ pub(super) fn paint(
         let cy = face.normal.dot(up) as f32;
         let text_pos = center + Vec2::new(cx, -cy) * CUBE_RADIUS;
         
-        let dot = face.normal.dot(forward);
-        if dot < -0.3 {
+        // Smooth label fading: fully visible at dot=-1, fading out at dot=-0.15
+        let label_alpha = ((-dot - 0.15) / 0.85).clamp(0.0, 1.0) as f32;
+        if label_alpha > 0.01 {
+            let base_color = if is_hovered { ThemeColors::TEXT } else { ThemeColors::TEXT_DIM };
+            let label_color = base_color.gamma_multiply(label_alpha);
             ui.painter().text(
                 text_pos,
                 egui::Align2::CENTER_CENTER,
                 face.label,
                 egui::FontId::proportional(12.0),
-                if is_hovered { ThemeColors::TEXT } else { ThemeColors::TEXT_DIM },
+                label_color,
             );
         }
     }
@@ -298,4 +305,13 @@ fn is_point_in_polygon(p: Pos2, polygon: &[Pos2]) -> bool {
         j = i;
     }
     inside
+}
+
+fn darken_color(color: Color32, factor: f32) -> Color32 {
+    Color32::from_rgba_unmultiplied(
+        (color.r() as f32 * factor).round().clamp(0.0, 255.0) as u8,
+        (color.g() as f32 * factor).round().clamp(0.0, 255.0) as u8,
+        (color.b() as f32 * factor).round().clamp(0.0, 255.0) as u8,
+        color.a(),
+    )
 }

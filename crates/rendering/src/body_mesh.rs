@@ -1,28 +1,75 @@
+//! Mesh generation for extruded sketch profiles.
+//! Produces triangle meshes with per-vertex normals and classified edges
+//! for high-quality shaded rendering in the viewport.
+
 use glam::{DVec2, DVec3};
 use roncad_geometry::SketchProfile;
 
 const PROFILE_EPSILON: f64 = 1e-6;
-const CIRCLE_SEGMENTS: usize = 48;
+const CIRCLE_SEGMENTS_MIN: usize = 24;
+const CIRCLE_SEGMENTS_MAX: usize = 96;
+const CIRCLE_SEGMENTS_PER_MM: f64 = 1.0;
 const CIRCLE_CONNECTORS: usize = 8;
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct MeshTriangle3d {
-    pub positions: [DVec3; 3],
+pub struct MeshVertex3d {
+    pub position: DVec3,
     pub normal: DVec3,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct MeshTriangle3d {
+    pub vertices: [MeshVertex3d; 3],
+}
+
+impl MeshTriangle3d {
+    /// Average face normal from vertex normals.
+    pub fn face_normal(&self) -> DVec3 {
+        let avg = self.vertices[0].normal + self.vertices[1].normal + self.vertices[2].normal;
+        let len = avg.length();
+        if len > PROFILE_EPSILON {
+            avg / len
+        } else {
+            geometric_normal(&self.vertices.each_ref().map(|v| v.position))
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EdgeKind {
+    /// Hard crease edge (polygon corners, cap boundaries).
+    Crease,
+    /// Smooth border edge (top/bottom outline of curved sections).
+    Border,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct MeshEdge3d {
+    pub start: DVec3,
+    pub end: DVec3,
+    pub kind: EdgeKind,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ExtrudeMesh3d {
     pub triangles: Vec<MeshTriangle3d>,
-    pub outline_edges: Vec<(DVec3, DVec3)>,
+    pub edges: Vec<MeshEdge3d>,
+}
+
+// Legacy compat: keep the old name available internally for the outline_edges
+// field consumers that destructure. The public API is `edges` now.
+impl ExtrudeMesh3d {
+    pub fn outline_edge_pairs(&self) -> Vec<(DVec3, DVec3)> {
+        self.edges.iter().map(|e| (e.start, e.end)).collect()
+    }
 }
 
 pub fn extrude_mesh(profile: &SketchProfile, distance_mm: f64) -> ExtrudeMesh3d {
-    let outline_2d = profile_outline_points(profile);
+    let (outline_2d, is_smooth_profile) = profile_outline_with_kind(profile);
     if outline_2d.len() < 3 {
         return ExtrudeMesh3d {
             triangles: Vec::new(),
-            outline_edges: Vec::new(),
+            edges: Vec::new(),
         };
     }
 
@@ -43,58 +90,81 @@ pub fn extrude_mesh(profile: &SketchProfile, distance_mm: f64) -> ExtrudeMesh3d 
     let bottom_normal = -top_normal;
 
     let mut triangles = Vec::new();
+
+    // --- Cap faces (flat shading) ---
     for [a, b, c] in triangulate_polygon(&outline_2d) {
-        push_oriented_triangle(&mut triangles, [base[a], base[b], base[c]], bottom_normal);
-        push_oriented_triangle(&mut triangles, [cap[a], cap[b], cap[c]], top_normal);
+        push_flat_triangle(&mut triangles, [base[a], base[b], base[c]], bottom_normal);
+        push_flat_triangle(&mut triangles, [cap[a], cap[b], cap[c]], top_normal);
     }
 
+    // --- Side faces ---
     let signed_area = signed_polygon_area(&outline_2d);
-    for index in 0..outline_2d.len() {
-        let next = (index + 1) % outline_2d.len();
+    let n = outline_2d.len();
+
+    // Precompute per-vertex smooth normals for circle profiles
+    let smooth_normals: Option<Vec<DVec3>> = if is_smooth_profile {
+        Some(
+            outline_2d
+                .iter()
+                .map(|p| {
+                    let radial = DVec3::new(p.x - centroid_2d.x, p.y - centroid_2d.y, 0.0);
+                    let len = radial.length();
+                    if len > PROFILE_EPSILON {
+                        if signed_area >= 0.0 {
+                            radial / len
+                        } else {
+                            -radial / len
+                        }
+                    } else {
+                        DVec3::Z
+                    }
+                })
+                .collect(),
+        )
+    } else {
+        None
+    };
+
+    for index in 0..n {
+        let next = (index + 1) % n;
         let edge = outline_2d[next] - outline_2d[index];
         if edge.length_squared() <= PROFILE_EPSILON * PROFILE_EPSILON {
             continue;
         }
-        let outward = if signed_area >= 0.0 {
-            DVec3::new(edge.y, -edge.x, 0.0)
+
+        if let Some(ref normals) = smooth_normals {
+            // Smooth shading: each vertex gets its radial normal
+            let n0 = normals[index];
+            let n1 = normals[next];
+
+            let outward = if signed_area >= 0.0 {
+                DVec3::new(edge.y, -edge.x, 0.0)
+            } else {
+                DVec3::new(-edge.y, edge.x, 0.0)
+            };
+            push_smooth_quad(
+                &mut triangles,
+                base[index],
+                base[next],
+                cap[next],
+                cap[index],
+                n0,
+                n1,
+                outward,
+            );
         } else {
-            DVec3::new(-edge.y, edge.x, 0.0)
-        };
-        push_oriented_triangle(
-            &mut triangles,
-            [base[index], base[next], cap[next]],
-            outward,
-        );
-        push_oriented_triangle(
-            &mut triangles,
-            [base[index], cap[next], cap[index]],
-            outward,
-        );
-    }
-
-    let mut outline_edges = Vec::new();
-    for index in 0..base.len() {
-        let next = (index + 1) % base.len();
-        outline_edges.push((base[index], base[next]));
-        outline_edges.push((cap[index], cap[next]));
-    }
-    for index in connector_indices(profile, base.len()) {
-        outline_edges.push((base[index], cap[index]));
-    }
-
-    // If the polygon is numerically tiny or oddly shaped, fall back to
-    // centroid-based side hints so rendering still has a stable mesh.
-    if triangles.is_empty() {
-        for index in 0..outline_2d.len() {
-            let next = (index + 1) % outline_2d.len();
-            let edge_mid = (outline_2d[index] + outline_2d[next]) * 0.5;
-            let outward = DVec3::new(edge_mid.x - centroid_2d.x, edge_mid.y - centroid_2d.y, 0.0);
-            push_oriented_triangle(
+            // Flat shading: per-face normal from edge direction
+            let outward = if signed_area >= 0.0 {
+                DVec3::new(edge.y, -edge.x, 0.0)
+            } else {
+                DVec3::new(-edge.y, edge.x, 0.0)
+            };
+            push_flat_triangle(
                 &mut triangles,
                 [base[index], base[next], cap[next]],
                 outward,
             );
-            push_oriented_triangle(
+            push_flat_triangle(
                 &mut triangles,
                 [base[index], cap[next], cap[index]],
                 outward,
@@ -102,18 +172,68 @@ pub fn extrude_mesh(profile: &SketchProfile, distance_mm: f64) -> ExtrudeMesh3d 
         }
     }
 
-    ExtrudeMesh3d {
-        triangles,
-        outline_edges,
+    // --- Edges ---
+    let mut edges = Vec::new();
+    let edge_kind_for_outline = if is_smooth_profile {
+        EdgeKind::Border
+    } else {
+        EdgeKind::Crease
+    };
+
+    for index in 0..base.len() {
+        let next = (index + 1) % base.len();
+        edges.push(MeshEdge3d {
+            start: base[index],
+            end: base[next],
+            kind: edge_kind_for_outline,
+        });
+        edges.push(MeshEdge3d {
+            start: cap[index],
+            end: cap[next],
+            kind: edge_kind_for_outline,
+        });
     }
+    for index in connector_indices(profile, base.len()) {
+        let kind = if is_smooth_profile {
+            EdgeKind::Border
+        } else {
+            EdgeKind::Crease
+        };
+        edges.push(MeshEdge3d {
+            start: base[index],
+            end: cap[index],
+            kind,
+        });
+    }
+
+    // Centroid-based fallback for degenerate polygons
+    if triangles.is_empty() {
+        for index in 0..outline_2d.len() {
+            let next = (index + 1) % outline_2d.len();
+            let edge_mid = (outline_2d[index] + outline_2d[next]) * 0.5;
+            let outward = DVec3::new(edge_mid.x - centroid_2d.x, edge_mid.y - centroid_2d.y, 0.0);
+            push_flat_triangle(
+                &mut triangles,
+                [base[index], base[next], cap[next]],
+                outward,
+            );
+            push_flat_triangle(
+                &mut triangles,
+                [base[index], cap[next], cap[index]],
+                outward,
+            );
+        }
+    }
+
+    ExtrudeMesh3d { triangles, edges }
 }
 
-fn push_oriented_triangle(
+fn push_flat_triangle(
     triangles: &mut Vec<MeshTriangle3d>,
     positions: [DVec3; 3],
     outward_hint: DVec3,
 ) {
-    let normal = triangle_normal(positions);
+    let normal = geometric_normal(&positions);
     if normal.length_squared() <= PROFILE_EPSILON * PROFILE_EPSILON {
         return;
     }
@@ -122,27 +242,98 @@ fn push_oriented_triangle(
         && normal.dot(outward_hint) < 0.0
     {
         let swapped = [positions[0], positions[2], positions[1]];
-        (swapped, triangle_normal(swapped).normalize())
+        (swapped, geometric_normal(&swapped).normalize())
     } else {
         (positions, normal.normalize())
     };
 
-    triangles.push(MeshTriangle3d { positions, normal });
+    triangles.push(MeshTriangle3d {
+        vertices: [
+            MeshVertex3d {
+                position: positions[0],
+                normal,
+            },
+            MeshVertex3d {
+                position: positions[1],
+                normal,
+            },
+            MeshVertex3d {
+                position: positions[2],
+                normal,
+            },
+        ],
+    });
 }
 
-fn triangle_normal(positions: [DVec3; 3]) -> DVec3 {
+fn push_smooth_quad(
+    triangles: &mut Vec<MeshTriangle3d>,
+    bl: DVec3,
+    br: DVec3,
+    tr: DVec3,
+    tl: DVec3,
+    normal_left: DVec3,
+    normal_right: DVec3,
+    outward_hint: DVec3,
+) {
+    let geometric = (br - bl).cross(tr - bl);
+    let flip = outward_hint.length_squared() > PROFILE_EPSILON * PROFILE_EPSILON
+        && geometric.dot(outward_hint) < 0.0;
+
+    if flip {
+        triangles.push(MeshTriangle3d {
+            vertices: [
+                MeshVertex3d { position: bl, normal: normal_left },
+                MeshVertex3d { position: tr, normal: normal_right },
+                MeshVertex3d { position: br, normal: normal_right },
+            ],
+        });
+        triangles.push(MeshTriangle3d {
+            vertices: [
+                MeshVertex3d { position: bl, normal: normal_left },
+                MeshVertex3d { position: tl, normal: normal_left },
+                MeshVertex3d { position: tr, normal: normal_right },
+            ],
+        });
+    } else {
+        triangles.push(MeshTriangle3d {
+            vertices: [
+                MeshVertex3d { position: bl, normal: normal_left },
+                MeshVertex3d { position: br, normal: normal_right },
+                MeshVertex3d { position: tr, normal: normal_right },
+            ],
+        });
+        triangles.push(MeshTriangle3d {
+            vertices: [
+                MeshVertex3d { position: bl, normal: normal_left },
+                MeshVertex3d { position: tr, normal: normal_right },
+                MeshVertex3d { position: tl, normal: normal_left },
+            ],
+        });
+    }
+}
+
+fn geometric_normal(positions: &[DVec3; 3]) -> DVec3 {
     (positions[1] - positions[0]).cross(positions[2] - positions[0])
 }
 
-fn profile_outline_points(profile: &SketchProfile) -> Vec<DVec2> {
+fn circle_segment_count(radius: f64) -> usize {
+    let count = (radius * CIRCLE_SEGMENTS_PER_MM) as usize;
+    count.clamp(CIRCLE_SEGMENTS_MIN, CIRCLE_SEGMENTS_MAX)
+}
+
+fn profile_outline_with_kind(profile: &SketchProfile) -> (Vec<DVec2>, bool) {
     match profile {
-        SketchProfile::Polygon { points } => points.clone(),
-        SketchProfile::Circle { center, radius } => (0..CIRCLE_SEGMENTS)
-            .map(|index| {
-                let angle = std::f64::consts::TAU * index as f64 / CIRCLE_SEGMENTS as f64;
-                *center + DVec2::new(angle.cos(), angle.sin()) * *radius
-            })
-            .collect(),
+        SketchProfile::Polygon { points } => (points.clone(), false),
+        SketchProfile::Circle { center, radius } => {
+            let segments = circle_segment_count(*radius);
+            let points = (0..segments)
+                .map(|index| {
+                    let angle = std::f64::consts::TAU * index as f64 / segments as f64;
+                    *center + DVec2::new(angle.cos(), angle.sin()) * *radius
+                })
+                .collect();
+            (points, true)
+        }
     }
 }
 
@@ -171,38 +362,78 @@ fn triangulate_polygon(points: &[DVec2]) -> Vec<[usize; 3]> {
 
     let mut triangles = Vec::new();
     while remaining.len() > 3 {
-        let mut clipped = false;
+        let mut best_ear = None;
+        let mut best_score = f64::NEG_INFINITY;
+
         for i in 0..remaining.len() {
             let prev = remaining[(i + remaining.len() - 1) % remaining.len()];
             let curr = remaining[i];
             let next = remaining[(i + 1) % remaining.len()];
 
-            if !is_convex(points[prev], points[curr], points[next]) {
+            let p_prev = points[prev];
+            let p_curr = points[curr];
+            let p_next = points[next];
+
+            if !is_convex(p_prev, p_curr, p_next) {
                 continue;
             }
 
-            if remaining.iter().copied().any(|candidate| {
-                candidate != prev
-                    && candidate != curr
-                    && candidate != next
-                    && point_in_triangle(
-                        points[candidate],
-                        points[prev],
-                        points[curr],
-                        points[next],
-                    )
-            }) {
-                continue;
+            // Check if any other point is inside this ear
+            let mut is_ear = true;
+            for &candidate in &remaining {
+                if candidate != prev && candidate != curr && candidate != next {
+                    if point_in_triangle(points[candidate], p_prev, p_curr, p_next) {
+                        is_ear = false;
+                        break;
+                    }
+                }
             }
 
-            triangles.push([prev, curr, next]);
-            remaining.remove(i);
-            clipped = true;
-            break;
+            if is_ear {
+                // Score the ear based on its minimum angle (higher is closer to equilateral)
+                let v1 = (p_prev - p_curr).normalize_or_zero();
+                let v2 = (p_next - p_curr).normalize_or_zero();
+                let v3 = (p_next - p_prev).normalize_or_zero();
+                
+                let dot1 = v1.dot(v2);
+                let dot2 = (-v1).dot(v3);
+                let dot3 = (-v2).dot(-v3);
+                
+                // Minimum angle corresponds to the maximum dot product
+                let max_dot = dot1.max(dot2).max(dot3);
+                // We want to minimize the max_dot (which means maximizing the min angle)
+                let score = -max_dot;
+
+                if score > best_score {
+                    best_score = score;
+                    best_ear = Some(i);
+                }
+            }
         }
 
-        if !clipped {
-            return Vec::new();
+        if let Some(ear_idx) = best_ear {
+            let prev = remaining[(ear_idx + remaining.len() - 1) % remaining.len()];
+            let curr = remaining[ear_idx];
+            let next = remaining[(ear_idx + 1) % remaining.len()];
+            triangles.push([prev, curr, next]);
+            remaining.remove(ear_idx);
+        } else {
+            // Fallback: just clip the first convex ear if score fails, or abort if none
+            let mut clipped = false;
+            for i in 0..remaining.len() {
+                let prev = remaining[(i + remaining.len() - 1) % remaining.len()];
+                let curr = remaining[i];
+                let next = remaining[(i + 1) % remaining.len()];
+                if is_convex(points[prev], points[curr], points[next]) {
+                    triangles.push([prev, curr, next]);
+                    remaining.remove(i);
+                    clipped = true;
+                    break;
+                }
+            }
+            if !clipped {
+                break; // Give up, prevent infinite loop
+            }
         }
     }
 
@@ -276,7 +507,7 @@ mod tests {
         );
 
         assert_eq!(mesh.triangles.len(), 12);
-        assert_eq!(mesh.outline_edges.len(), 12);
+        assert_eq!(mesh.edges.len(), 12);
     }
 
     #[test]
@@ -299,6 +530,80 @@ mod tests {
         assert!(mesh
             .triangles
             .iter()
-            .all(|triangle| triangle.normal.is_finite()));
+            .all(|triangle| triangle.face_normal().is_finite()));
+    }
+
+    #[test]
+    fn circle_extrude_has_smooth_radial_normals() {
+        let mesh = extrude_mesh(
+            &SketchProfile::Circle {
+                center: dvec2(0.0, 0.0),
+                radius: 10.0,
+            },
+            5.0,
+        );
+
+        assert!(!mesh.triangles.is_empty());
+
+        // Check that side-face vertex normals are roughly radial (z component ≈ 0)
+        let side_triangles: Vec<_> = mesh
+            .triangles
+            .iter()
+            .filter(|tri| {
+                let fn_ = tri.face_normal();
+                fn_.z.abs() < 0.5 // not a cap face
+            })
+            .collect();
+        assert!(!side_triangles.is_empty());
+
+        for tri in &side_triangles {
+            for v in &tri.vertices {
+                assert!(
+                    v.normal.z.abs() < 0.01,
+                    "side vertex normal should have near-zero z, got {:?}",
+                    v.normal
+                );
+                assert!(
+                    v.normal.length() > 0.99,
+                    "vertex normal should be unit length"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn polygon_edges_are_crease_kind() {
+        let mesh = extrude_mesh(
+            &SketchProfile::Polygon {
+                points: vec![
+                    dvec2(0.0, 0.0),
+                    dvec2(10.0, 0.0),
+                    dvec2(10.0, 5.0),
+                    dvec2(0.0, 5.0),
+                ],
+            },
+            12.0,
+        );
+
+        assert!(mesh
+            .edges
+            .iter()
+            .all(|e| e.kind == super::EdgeKind::Crease));
+    }
+
+    #[test]
+    fn circle_edges_are_border_kind() {
+        let mesh = extrude_mesh(
+            &SketchProfile::Circle {
+                center: dvec2(0.0, 0.0),
+                radius: 5.0,
+            },
+            10.0,
+        );
+
+        assert!(mesh
+            .edges
+            .iter()
+            .all(|e| e.kind == super::EdgeKind::Border));
     }
 }

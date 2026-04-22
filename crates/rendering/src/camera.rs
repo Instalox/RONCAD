@@ -8,6 +8,8 @@ const MIN_ORBIT_RADIUS_MM: f64 = 8.0;
 const MAX_ORBIT_RADIUS_MM: f64 = 100_000.0;
 const NEAR_PLANE_MM: f64 = 0.1;
 const ORBIT_RADIANS_PER_PIXEL: f64 = 0.01;
+const PITCH_LIMIT_RADIANS: f64 = 89.5_f64 * std::f64::consts::PI / 180.0;
+const ANIMATION_DURATION_SECS: f64 = 0.25;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Projection {
@@ -27,6 +29,17 @@ pub struct Camera2d {
     scale_axis_u_world: DVec3,
     scale_axis_v_world: DVec3,
     projection: Projection,
+    animation: Option<OrientationAnimation>,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct OrientationAnimation {
+    start_yaw: f64,
+    start_pitch: f64,
+    target_yaw: f64,
+    target_pitch: f64,
+    elapsed: f64,
+    duration: f64,
 }
 
 impl Default for Camera2d {
@@ -42,6 +55,7 @@ impl Default for Camera2d {
             scale_axis_u_world: DVec3::X,
             scale_axis_v_world: DVec3::Y,
             projection: Projection::Perspective,
+            animation: None,
         };
         camera.refresh_pixels_per_mm();
         camera
@@ -223,10 +237,58 @@ impl Camera2d {
     }
 
     pub fn set_orientation(&mut self, yaw_radians: f64, pitch_radians: f64) {
+        self.animation = Some(OrientationAnimation {
+            start_yaw: self.yaw_radians,
+            start_pitch: self.pitch_radians,
+            target_yaw: yaw_radians,
+            target_pitch: pitch_radians,
+            elapsed: 0.0,
+            duration: ANIMATION_DURATION_SECS,
+        });
+    }
+
+    /// Instantly set orientation without animation.
+    pub fn set_orientation_immediate(&mut self, yaw_radians: f64, pitch_radians: f64) {
+        self.animation = None;
         self.yaw_radians = yaw_radians;
         self.pitch_radians = pitch_radians;
         self.normalize_angles();
         self.refresh_pixels_per_mm();
+    }
+
+    /// Advance the orientation animation. Returns `true` while still animating.
+    pub fn animate_step(&mut self, dt_seconds: f64) -> bool {
+        let Some(ref mut anim) = self.animation else {
+            return false;
+        };
+        anim.elapsed += dt_seconds;
+        let t = (anim.elapsed / anim.duration).clamp(0.0, 1.0);
+        // Smooth ease-out cubic: 1 - (1-t)^3
+        let eased = 1.0 - (1.0 - t).powi(3);
+
+        // Shortest-path yaw interpolation
+        let mut dy = anim.target_yaw - anim.start_yaw;
+        if dy > std::f64::consts::PI {
+            dy -= std::f64::consts::TAU;
+        } else if dy < -std::f64::consts::PI {
+            dy += std::f64::consts::TAU;
+        }
+        self.yaw_radians = anim.start_yaw + dy * eased;
+        self.pitch_radians = anim.start_pitch + (anim.target_pitch - anim.start_pitch) * eased;
+        self.normalize_angles();
+        self.refresh_pixels_per_mm();
+
+        if t >= 1.0 {
+            self.animation = None;
+            false
+        } else {
+            true
+        }
+    }
+
+    /// Whether the camera is currently animating.
+    pub fn is_animating(&self) -> bool {
+        self.animation.is_some()
     }
 
     pub fn yaw_radians(&self) -> f64 {
@@ -351,7 +413,7 @@ impl Camera2d {
     fn normalize_angles(&mut self) {
         let two_pi = std::f64::consts::TAU;
         self.yaw_radians = self.yaw_radians.rem_euclid(two_pi);
-        self.pitch_radians = wrap_signed(self.pitch_radians);
+        self.pitch_radians = self.pitch_radians.clamp(-PITCH_LIMIT_RADIANS, PITCH_LIMIT_RADIANS);
     }
 
     fn basis(&self) -> (DVec3, DVec3, DVec3) {
@@ -401,11 +463,6 @@ fn workplane_translation(workplane: &Workplane, delta_mm: DVec2) -> DVec3 {
     workplane.u.normalize() * delta_mm.x + workplane.v.normalize() * delta_mm.y
 }
 
-fn wrap_signed(angle: f64) -> f64 {
-    let two_pi = std::f64::consts::TAU;
-    let wrapped = (angle + std::f64::consts::PI).rem_euclid(two_pi);
-    wrapped - std::f64::consts::PI
-}
 
 fn bounds_corners(min_mm: DVec3, max_mm: DVec3) -> [DVec3; 8] {
     [
@@ -476,11 +533,12 @@ mod tests {
 
     #[test]
     fn ortho_projection_preserves_apparent_size_at_target() {
-        // Top view places the target plane at z=0, so points with z=0 sit at the
-        // focal depth and persp/ortho should agree pixel-for-pixel there.
+        // Near-top view: pitch clamps at 89.5° so there's a tiny off-axis
+        // component. Persp and ortho should still agree within a loose tolerance
+        // for points at the target depth.
         let mut camera = Camera2d::default();
         camera.update_viewport(dvec2(800.0, 600.0));
-        camera.set_orientation(FRAC_PI_2, FRAC_PI_2);
+        camera.set_orientation_immediate(FRAC_PI_2, FRAC_PI_2);
         let center = dvec2(400.0, 300.0);
         let world_point = dvec3(7.5, -3.25, 0.0);
 
@@ -488,15 +546,15 @@ mod tests {
         camera.set_projection(Projection::Orthographic);
         let ortho = camera.project_point(world_point, center).unwrap();
 
-        assert!((persp.x - ortho.x).abs() < 1e-3);
-        assert!((persp.y - ortho.y).abs() < 1e-3);
+        assert!((persp.x - ortho.x).abs() < 1.0);
+        assert!((persp.y - ortho.y).abs() < 1.0);
     }
 
     #[test]
     fn top_view_orientation_matches_blender_convention() {
         let mut camera = Camera2d::default();
         camera.update_viewport(dvec2(800.0, 600.0));
-        camera.set_orientation(FRAC_PI_2, FRAC_PI_2);
+        camera.set_orientation_immediate(FRAC_PI_2, FRAC_PI_2);
         let center = dvec2(400.0, 300.0);
 
         let plus_x = camera
@@ -515,11 +573,11 @@ mod tests {
     }
 
     #[test]
-    fn orbit_past_pole_does_not_break_basis() {
+    fn orbit_past_pole_is_clamped_and_stable() {
         let mut camera = Camera2d::default();
         camera.update_viewport(dvec2(800.0, 600.0));
-        // Drag MMB straight up by many pixels — should pass over the pole
-        // multiple times without producing NaN projections.
+        // Drag MMB straight up by many pixels — pitch should clamp at the
+        // limit without producing NaN projections.
         for _ in 0..400 {
             camera.orbit_pixels(dvec2(0.0, -50.0));
         }
@@ -528,5 +586,34 @@ mod tests {
         assert!(projected.is_some());
         let p = projected.unwrap();
         assert!(p.x.is_finite() && p.y.is_finite());
+        // Pitch should be clamped near the limit, not wrapped
+        assert!(camera.pitch_radians().abs() <= FRAC_PI_2);
+    }
+
+    #[test]
+    fn pitch_clamping_prevents_over_rotation() {
+        let mut camera = Camera2d::default();
+        camera.update_viewport(dvec2(800.0, 600.0));
+        camera.set_orientation_immediate(0.0, 100.0_f64.to_radians());
+        assert!(camera.pitch_radians() <= 89.5_f64.to_radians() + 1e-6);
+        camera.set_orientation_immediate(0.0, -100.0_f64.to_radians());
+        assert!(camera.pitch_radians() >= -89.5_f64.to_radians() - 1e-6);
+    }
+
+    #[test]
+    fn animation_converges_to_target() {
+        let mut camera = Camera2d::default();
+        camera.update_viewport(dvec2(800.0, 600.0));
+        camera.set_orientation(FRAC_PI_2, FRAC_PI_2);
+        assert!(camera.is_animating());
+
+        // Step well past the animation duration
+        for _ in 0..20 {
+            camera.animate_step(0.02);
+        }
+
+        assert!(!camera.is_animating());
+        // Pitch is clamped to PITCH_LIMIT, which is < FRAC_PI_2
+        assert!((camera.yaw_radians() - FRAC_PI_2).abs() < 1e-6);
     }
 }
