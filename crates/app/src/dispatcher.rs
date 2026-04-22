@@ -3,11 +3,14 @@
 
 use roncad_core::command::{AppCommand, ProfileRegion};
 use roncad_core::selection::{Selection, SelectionItem};
+use roncad_core::ids::SketchId;
 use roncad_geometry::{
-    apply_line_fillet, Project, Sketch, SketchDimension, SketchEntity, SketchProfile,
+    apply_line_fillet, infer_constraints, solve_sketch, Project, Sketch, SketchDimension,
+    SketchEntity, SketchProfile,
 };
 
 pub fn apply(project: &mut Project, selection: &mut Selection, command: &AppCommand) {
+    let resolve_target = sketch_target(command);
     match command {
         AppCommand::CreateSketch { name, plane } => {
             if project.workplanes.contains_key(*plane) {
@@ -36,21 +39,8 @@ pub fn apply(project: &mut Project, selection: &mut Selection, command: &AppComm
         }
         AppCommand::AddLine { sketch, a, b } => {
             if let Some(s) = project.sketches.get_mut(*sketch) {
-                let result = s.add_line_with_splits(*a, *b);
-                for replacement in result.replaced {
-                    let selected_original = SelectionItem::SketchEntity {
-                        sketch: *sketch,
-                        entity: replacement.original,
-                    };
-                    if selection.remove(&selected_original) {
-                        for entity in replacement.segments {
-                            selection.insert(SelectionItem::SketchEntity {
-                                sketch: *sketch,
-                                entity,
-                            });
-                        }
-                    }
-                }
+                let id = s.add(SketchEntity::Line { a: *a, b: *b });
+                infer_constraints(s, id);
             }
         }
         AppCommand::AddRectangle {
@@ -71,10 +61,11 @@ pub fn apply(project: &mut Project, selection: &mut Selection, command: &AppComm
             radius,
         } => {
             if let Some(s) = project.sketches.get_mut(*sketch) {
-                s.add(SketchEntity::Circle {
+                let id = s.add(SketchEntity::Circle {
                     center: *center,
                     radius: radius.as_f64(),
                 });
+                infer_constraints(s, id);
             }
         }
         AppCommand::AddArc {
@@ -85,12 +76,13 @@ pub fn apply(project: &mut Project, selection: &mut Selection, command: &AppComm
             sweep_angle,
         } => {
             if let Some(s) = project.sketches.get_mut(*sketch) {
-                s.add(SketchEntity::Arc {
+                let id = s.add(SketchEntity::Arc {
                     center: *center,
                     radius: radius.as_f64(),
                     start_angle: *start_angle,
                     sweep_angle: *sweep_angle,
                 });
+                infer_constraints(s, id);
             }
         }
         AppCommand::ApplyLineFillet {
@@ -143,6 +135,14 @@ pub fn apply(project: &mut Project, selection: &mut Selection, command: &AppComm
                     start: *start,
                     end: *end,
                 });
+            }
+        }
+        AppCommand::AddConstraint { sketch, constraint } => {
+            if let Some(s) = project.sketches.get_mut(*sketch) {
+                let refs = constraint.referenced_entities();
+                if refs.iter().all(|id| s.entities.contains_key(*id)) {
+                    s.add_constraint(*constraint);
+                }
             }
         }
         AppCommand::SetLineLength {
@@ -343,6 +343,36 @@ pub fn apply(project: &mut Project, selection: &mut Selection, command: &AppComm
         }
         AppCommand::NoOp => {}
     }
+
+    if let Some(sketch_id) = resolve_target {
+        if let Some(s) = project.sketches.get_mut(sketch_id) {
+            solve_sketch(s);
+        }
+    }
+}
+
+/// Sketch id to re-solve after this command runs, if any. Commands that
+/// mutate entity geometry or the constraint set get the solver; selection
+/// and feature-producing commands skip it.
+fn sketch_target(command: &AppCommand) -> Option<SketchId> {
+    match command {
+        AppCommand::AddLine { sketch, .. }
+        | AppCommand::AddRectangle { sketch, .. }
+        | AppCommand::AddCircle { sketch, .. }
+        | AppCommand::AddArc { sketch, .. }
+        | AppCommand::ApplyLineFillet { sketch, .. }
+        | AppCommand::AddConstraint { sketch, .. }
+        | AppCommand::SetLineLength { sketch, .. }
+        | AppCommand::SetRectangleWidth { sketch, .. }
+        | AppCommand::SetRectangleHeight { sketch, .. }
+        | AppCommand::SetCircleRadius { sketch, .. }
+        | AppCommand::SetArcRadius { sketch, .. }
+        | AppCommand::SetArcSweepDegrees { sketch, .. }
+        | AppCommand::SetPointX { sketch, .. }
+        | AppCommand::SetPointY { sketch, .. }
+        | AppCommand::DeleteEntity { sketch, .. } => Some(*sketch),
+        _ => None,
+    }
 }
 
 fn sketch_profile(profile: &ProfileRegion) -> SketchProfile {
@@ -507,7 +537,7 @@ mod tests {
     }
 
     #[test]
-    fn add_line_splits_crossing_lines_into_four_entities() {
+    fn add_line_leaves_existing_crossings_intact() {
         let mut project = Project::new_untitled();
         let mut selection = Selection::default();
         let sketch = project.active_sketch.expect("default project has sketch");
@@ -541,73 +571,9 @@ mod tests {
             })
             .collect();
 
-        assert_eq!(lines.len(), 4);
-        assert!(contains_line(&lines, dvec2(0.0, 0.0), dvec2(5.0, 5.0)));
-        assert!(contains_line(&lines, dvec2(5.0, 5.0), dvec2(10.0, 10.0)));
-        assert!(contains_line(&lines, dvec2(0.0, 10.0), dvec2(5.0, 5.0)));
-        assert!(contains_line(&lines, dvec2(5.0, 5.0), dvec2(10.0, 0.0)));
-    }
-
-    #[test]
-    fn split_line_replaces_existing_selection_with_new_segments() {
-        let mut project = Project::new_untitled();
-        let mut selection = Selection::default();
-        let sketch = project.active_sketch.expect("default project has sketch");
-        let original =
-            project
-                .active_sketch_mut()
-                .expect("active sketch")
-                .add(SketchEntity::Line {
-                    a: dvec2(0.0, 0.0),
-                    b: dvec2(10.0, 0.0),
-                });
-        selection.insert(SelectionItem::SketchEntity {
-            sketch,
-            entity: original,
-        });
-
-        apply(
-            &mut project,
-            &mut selection,
-            &AppCommand::AddLine {
-                sketch,
-                a: dvec2(5.0, -4.0),
-                b: dvec2(5.0, 4.0),
-            },
-        );
-
-        let selected_lines: Vec<_> = selection
-            .iter()
-            .filter_map(|item| match item {
-                SelectionItem::SketchEntity {
-                    sketch: selected_sketch,
-                    entity,
-                } if *selected_sketch == sketch => {
-                    match project
-                        .active_sketch()
-                        .expect("active sketch")
-                        .entities
-                        .get(*entity)
-                    {
-                        Some(SketchEntity::Line { a, b }) => Some((*a, *b)),
-                        _ => None,
-                    }
-                }
-                _ => None,
-            })
-            .collect();
-
-        assert_eq!(selected_lines.len(), 2);
-        assert!(contains_line(
-            &selected_lines,
-            dvec2(0.0, 0.0),
-            dvec2(5.0, 0.0)
-        ));
-        assert!(contains_line(
-            &selected_lines,
-            dvec2(5.0, 0.0),
-            dvec2(10.0, 0.0)
-        ));
+        assert_eq!(lines.len(), 2);
+        assert!(contains_line(&lines, dvec2(0.0, 0.0), dvec2(10.0, 10.0)));
+        assert!(contains_line(&lines, dvec2(0.0, 10.0), dvec2(10.0, 0.0)));
     }
 
     #[test]

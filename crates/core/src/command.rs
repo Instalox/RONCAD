@@ -5,6 +5,7 @@
 use glam::DVec2;
 use serde::{Deserialize, Serialize};
 
+use crate::constraint::Constraint;
 use crate::ids::{BodyId, SketchEntityId, SketchId, WorkplaneId};
 use crate::units::LengthMm;
 
@@ -55,6 +56,10 @@ pub enum AppCommand {
         sketch: SketchId,
         start: DVec2,
         end: DVec2,
+    },
+    AddConstraint {
+        sketch: SketchId,
+        constraint: Constraint,
     },
     SetLineLength {
         sketch: SketchId,

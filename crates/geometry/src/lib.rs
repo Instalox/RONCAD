@@ -3,6 +3,8 @@
 
 pub mod arc;
 pub mod body;
+pub mod constraint;
+pub mod constraint_inference;
 pub mod feature;
 pub mod fillet;
 pub mod hover_target;
@@ -12,6 +14,7 @@ pub mod project;
 pub mod sketch;
 pub mod sketch_dimension;
 pub mod sketch_entity;
+pub mod solver;
 pub mod workplane;
 
 pub use arc::{
@@ -19,6 +22,9 @@ pub use arc::{
     arc_start_point, distance_to_arc,
 };
 pub use body::Body;
+pub use constraint::{resolve_entity_point, Constraint, EntityPoint};
+pub use constraint_inference::{infer_constraints, INFERENCE_EPSILON};
+pub use solver::{solve_sketch, solve_sketch_with, SolveReport, SolveStatus};
 pub use feature::{ExtrudeFeature, Feature};
 pub use fillet::{
     apply_line_fillet, fillet_candidate_for_lines, find_line_fillet_candidate,

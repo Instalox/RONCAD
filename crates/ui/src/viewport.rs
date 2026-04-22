@@ -3,6 +3,7 @@
 //! owns interaction policy and injects it here as a controller callback.
 
 mod body_overlay;
+mod constraint_overlay;
 mod dimension_overlay;
 mod dynamic_overlay;
 mod extrude_overlay;
@@ -85,6 +86,7 @@ pub fn render_in_rect(
                 shell.project,
                 shell.selection,
             );
+            constraint_overlay::paint(ui.painter(), rect, shell.camera, shell.project);
             profile_overlay::paint(
                 ui.painter(),
                 rect,
