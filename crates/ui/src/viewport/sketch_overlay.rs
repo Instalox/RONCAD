@@ -1,6 +1,8 @@
 use egui::{Color32, Rect, Stroke};
 use roncad_core::selection::{Selection, SelectionItem};
-use roncad_geometry::{arc_sample_points, HoverTarget, Project, SketchEntity};
+use roncad_geometry::{
+    arc_sample_points, ConstraintDiagnosticKind, HoverTarget, Project, SketchEntity, SolveReport,
+};
 use roncad_rendering::Camera2d;
 
 use super::{project_workplane_point, screen_center, tool_overlay, COLOR_SKETCH};
@@ -14,6 +16,7 @@ pub(super) fn paint(
     camera: &Camera2d,
     project: &Project,
     selection: &Selection,
+    report: Option<&SolveReport>,
     hovered_target: Option<&HoverTarget>,
 ) {
     let Some(sketch_id) = project.active_sketch else {
@@ -34,10 +37,15 @@ pub(super) fn paint(
         });
         let hovered =
             hovered_target.is_some_and(|target| target.matches_sketch_entity(sketch_id, entity_id));
+        let problem = problem_entity_kind(report, entity_id);
         let color = if selected {
             ThemeColors::ACCENT
         } else if hovered {
             COLOR_HOVER
+        } else if problem == Some(ConstraintDiagnosticKind::Failed) {
+            ThemeColors::ACCENT_RED
+        } else if problem == Some(ConstraintDiagnosticKind::Unsatisfied) {
+            ThemeColors::ACCENT_AMBER
         } else {
             COLOR_SKETCH
         };
@@ -47,6 +55,8 @@ pub(super) fn paint(
             2.2
         } else if hovered {
             2.0
+        } else if problem.is_some() {
+            2.1
         } else {
             1.6
         };
@@ -114,4 +124,22 @@ pub(super) fn paint(
             }
         }
     }
+}
+
+fn problem_entity_kind(
+    report: Option<&SolveReport>,
+    entity_id: roncad_core::ids::SketchEntityId,
+) -> Option<ConstraintDiagnosticKind> {
+    let report = report?;
+    let mut kind = None;
+    for diagnostic in &report.diagnostics {
+        if diagnostic.referenced_entities.contains(&entity_id) {
+            kind = Some(match (kind, diagnostic.kind) {
+                (Some(ConstraintDiagnosticKind::Failed), _) => ConstraintDiagnosticKind::Failed,
+                (_, ConstraintDiagnosticKind::Failed) => ConstraintDiagnosticKind::Failed,
+                _ => ConstraintDiagnosticKind::Unsatisfied,
+            });
+        }
+    }
+    kind
 }

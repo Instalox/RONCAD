@@ -6,7 +6,7 @@
 //! the iteration budget is exhausted. Satisfied state is written back into
 //! the sketch's entities.
 //!
-//! No external linear-algebra dependency — we use forward-difference
+//! No external linear-algebra dependency - we use forward-difference
 //! Jacobians and Gauss elimination with partial pivoting, which is fine for
 //! the modest DOF counts typical of sketches.
 
@@ -14,7 +14,7 @@ use std::collections::HashMap;
 
 use glam::DVec2;
 use roncad_core::constraint::{Constraint, EntityPoint};
-use roncad_core::ids::SketchEntityId;
+use roncad_core::ids::{ConstraintId, SketchEntityId};
 
 use crate::sketch::Sketch;
 use crate::sketch_entity::SketchEntity;
@@ -23,15 +23,33 @@ const DEFAULT_MAX_ITERS: usize = 40;
 const DEFAULT_TOLERANCE: f64 = 1e-8;
 const INITIAL_LAMBDA: f64 = 1e-3;
 const JACOBIAN_H: f64 = 1e-7;
+const CONSTRAINT_SATISFIED_TOLERANCE: f64 = 1e-4;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SolveStatus {
-    /// Converged within tolerance.
-    Converged,
-    /// Iteration budget exhausted. Residual may still be large.
-    MaxItersReached,
-    /// Nothing to do (no constraints, or no entities).
-    Trivial,
+    /// Constraints are satisfied but the sketch still appears to have free DOFs.
+    Underdefined,
+    /// Constraints are satisfied and the sketch appears fully constrained.
+    Solved,
+    /// One or more constraints remain unsatisfied.
+    Conflicting,
+    /// One or more constraints could not be evaluated.
+    Failed,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConstraintDiagnosticKind {
+    Unsatisfied,
+    Failed,
+}
+
+#[derive(Debug, Clone)]
+pub struct ConstraintDiagnostic {
+    pub id: ConstraintId,
+    pub constraint: Constraint,
+    pub kind: ConstraintDiagnosticKind,
+    pub residual_norm: f64,
+    pub referenced_entities: Vec<SketchEntityId>,
 }
 
 #[derive(Debug, Clone)]
@@ -39,6 +57,11 @@ pub struct SolveReport {
     pub status: SolveStatus,
     pub iterations: usize,
     pub final_residual_norm: f64,
+    pub constraint_count: usize,
+    pub unsatisfied_count: usize,
+    pub failed_count: usize,
+    pub estimated_free_dofs: usize,
+    pub diagnostics: Vec<ConstraintDiagnostic>,
 }
 
 /// Run the solver on `sketch` and write the result back in place.
@@ -48,29 +71,43 @@ pub fn solve_sketch(sketch: &mut Sketch) -> SolveReport {
 
 pub fn solve_sketch_with(sketch: &mut Sketch, max_iters: usize, tol: f64) -> SolveReport {
     let layout = DofLayout::build(sketch);
-    let constraints: Vec<Constraint> = sketch.constraints.values().copied().collect();
+    let constraints: Vec<(ConstraintId, Constraint)> = sketch
+        .constraints
+        .iter()
+        .map(|(id, constraint)| (id, *constraint))
+        .collect();
 
-    if layout.total_dofs == 0 || constraints.is_empty() {
+    if constraints.is_empty() {
         return SolveReport {
-            status: SolveStatus::Trivial,
+            status: if layout.total_dofs > 0 {
+                SolveStatus::Underdefined
+            } else {
+                SolveStatus::Solved
+            },
             iterations: 0,
             final_residual_norm: 0.0,
+            constraint_count: 0,
+            unsatisfied_count: 0,
+            failed_count: 0,
+            estimated_free_dofs: layout.total_dofs,
+            diagnostics: Vec::new(),
         };
     }
 
     let mut x = pack_dofs(sketch, &layout);
     let mut lambda = INITIAL_LAMBDA;
 
-    let mut r = residuals(&x, &layout, &constraints);
-    let mut r_norm = vec_norm(&r);
+    let mut evaluations = evaluate_constraints(&x, &layout, &constraints);
+    let mut residuals = residual_vector(&evaluations);
+    let mut residual_norm = vec_norm(&residuals);
     let mut iter = 0;
 
-    while iter < max_iters && r_norm > tol {
-        let j = numerical_jacobian(&x, &layout, &constraints, &r);
+    while iter < max_iters && residual_norm > tol {
+        let j = numerical_jacobian(&x, &layout, &constraints, &residuals);
 
-        // Normal equations with LM damping: (J^T J + λI) Δx = -J^T r
+        // Normal equations with LM damping: (J^T J + lambda I) dx = -J^T r
         let jt_j = jtj(&j);
-        let jt_r = jtv(&j, &r);
+        let jt_r = jtv(&j, &residuals);
         let damped = damped_symmetric(&jt_j, lambda);
         let neg_jt_r: Vec<f64> = jt_r.iter().map(|v| -v).collect();
 
@@ -81,13 +118,14 @@ pub fn solve_sketch_with(sketch: &mut Sketch, max_iters: usize, tol: f64) -> Sol
         };
 
         let x_trial: Vec<f64> = x.iter().zip(dx.iter()).map(|(a, b)| a + b).collect();
-        let r_trial = residuals(&x_trial, &layout, &constraints);
-        let r_trial_norm = vec_norm(&r_trial);
+        let trial_residuals =
+            residual_vector(&evaluate_constraints(&x_trial, &layout, &constraints));
+        let trial_residual_norm = vec_norm(&trial_residuals);
 
-        if r_trial_norm < r_norm {
+        if trial_residual_norm < residual_norm {
             x = x_trial;
-            r = r_trial;
-            r_norm = r_trial_norm;
+            residuals = trial_residuals;
+            residual_norm = trial_residual_norm;
             lambda = (lambda * 0.5).max(1e-12);
         } else {
             lambda *= 4.0;
@@ -98,14 +136,48 @@ pub fn solve_sketch_with(sketch: &mut Sketch, max_iters: usize, tol: f64) -> Sol
 
     unpack_dofs(sketch, &layout, &x);
 
+    evaluations = evaluate_constraints(&x, &layout, &constraints);
+    residuals = residual_vector(&evaluations);
+    residual_norm = vec_norm(&residuals);
+
+    let diagnostics: Vec<_> = evaluations
+        .iter()
+        .filter_map(ConstraintEvaluation::to_diagnostic)
+        .collect();
+    let failed_count = diagnostics
+        .iter()
+        .filter(|diagnostic| diagnostic.kind == ConstraintDiagnosticKind::Failed)
+        .count();
+    let unsatisfied_count = diagnostics
+        .iter()
+        .filter(|diagnostic| diagnostic.kind == ConstraintDiagnosticKind::Unsatisfied)
+        .count();
+    let estimated_free_dofs = if failed_count > 0 || residuals.is_empty() {
+        layout.total_dofs
+    } else {
+        let j = numerical_jacobian(&x, &layout, &constraints, &residuals);
+        layout.total_dofs.saturating_sub(matrix_rank(&j, 1e-7))
+    };
+
+    let status = if failed_count > 0 {
+        SolveStatus::Failed
+    } else if unsatisfied_count > 0 {
+        SolveStatus::Conflicting
+    } else if estimated_free_dofs > 0 {
+        SolveStatus::Underdefined
+    } else {
+        SolveStatus::Solved
+    };
+
     SolveReport {
-        status: if r_norm <= tol {
-            SolveStatus::Converged
-        } else {
-            SolveStatus::MaxItersReached
-        },
+        status,
         iterations: iter,
-        final_residual_norm: r_norm,
+        final_residual_norm: residual_norm,
+        constraint_count: constraints.len(),
+        unsatisfied_count,
+        failed_count,
+        estimated_free_dofs,
+        diagnostics,
     }
 }
 
@@ -249,9 +321,6 @@ fn unpack_dofs(sketch: &mut Sketch, layout: &DofLayout, x: &[f64]) {
 }
 
 // --- Residuals ---------------------------------------------------------
-//
-// Each helper reads directly from the DOF vector via `layout` so that the
-// solver can evaluate against trial states without mutating the sketch.
 
 fn entity_point(x: &[f64], layout: &DofLayout, handle: EntityPoint) -> Option<DVec2> {
     let (off, kind) = layout.ranges.get(&handle.entity()).copied()?;
@@ -279,7 +348,6 @@ fn entity_point(x: &[f64], layout: &DofLayout, handle: EntityPoint) -> Option<DV
     }
 }
 
-/// Returns (a, b) for a line entity, or None for wrong kind.
 fn line_points(x: &[f64], layout: &DofLayout, id: SketchEntityId) -> Option<(DVec2, DVec2)> {
     let (off, kind) = layout.ranges.get(&id).copied()?;
     match kind {
@@ -291,7 +359,6 @@ fn line_points(x: &[f64], layout: &DofLayout, id: SketchEntityId) -> Option<(DVe
     }
 }
 
-/// Returns (center, radius) for a circle or arc, else None.
 fn curve_center_radius(x: &[f64], layout: &DofLayout, id: SketchEntityId) -> Option<(DVec2, f64)> {
     let (off, kind) = layout.ranges.get(&id).copied()?;
     match kind {
@@ -300,45 +367,96 @@ fn curve_center_radius(x: &[f64], layout: &DofLayout, id: SketchEntityId) -> Opt
     }
 }
 
-fn residuals(x: &[f64], layout: &DofLayout, constraints: &[Constraint]) -> Vec<f64> {
-    let mut r = Vec::new();
-    for c in constraints {
-        append_residual(&mut r, x, layout, c);
-    }
-    r
+#[derive(Debug, Clone)]
+struct ConstraintEvaluation {
+    id: ConstraintId,
+    constraint: Constraint,
+    residuals: Vec<f64>,
+    residual_norm: f64,
+    valid: bool,
 }
 
-fn append_residual(out: &mut Vec<f64>, x: &[f64], layout: &DofLayout, c: &Constraint) {
-    match *c {
+impl ConstraintEvaluation {
+    fn diagnostic_kind(&self) -> Option<ConstraintDiagnosticKind> {
+        if !self.valid {
+            Some(ConstraintDiagnosticKind::Failed)
+        } else if self.residual_norm > CONSTRAINT_SATISFIED_TOLERANCE {
+            Some(ConstraintDiagnosticKind::Unsatisfied)
+        } else {
+            None
+        }
+    }
+
+    fn to_diagnostic(&self) -> Option<ConstraintDiagnostic> {
+        Some(ConstraintDiagnostic {
+            id: self.id,
+            constraint: self.constraint,
+            kind: self.diagnostic_kind()?,
+            residual_norm: self.residual_norm,
+            referenced_entities: self.constraint.referenced_entities(),
+        })
+    }
+}
+
+fn evaluate_constraints(
+    x: &[f64],
+    layout: &DofLayout,
+    constraints: &[(ConstraintId, Constraint)],
+) -> Vec<ConstraintEvaluation> {
+    constraints
+        .iter()
+        .map(|(id, constraint)| evaluate_constraint(x, layout, *id, constraint))
+        .collect()
+}
+
+fn residual_vector(evaluations: &[ConstraintEvaluation]) -> Vec<f64> {
+    evaluations
+        .iter()
+        .flat_map(|evaluation| evaluation.residuals.iter().copied())
+        .collect()
+}
+
+fn evaluate_constraint(
+    x: &[f64],
+    layout: &DofLayout,
+    id: ConstraintId,
+    constraint: &Constraint,
+) -> ConstraintEvaluation {
+    let (residuals, valid) = match *constraint {
         Constraint::Coincident { a, b } => {
             if let (Some(pa), Some(pb)) = (entity_point(x, layout, a), entity_point(x, layout, b)) {
-                out.push(pa.x - pb.x);
-                out.push(pa.y - pb.y);
+                (vec![pa.x - pb.x, pa.y - pb.y], true)
+            } else {
+                (Vec::new(), false)
             }
         }
         Constraint::PointOnEntity { point, entity } => {
-            let Some(p) = entity_point(x, layout, point) else {
-                return;
-            };
-            if let Some((la, lb)) = line_points(x, layout, entity) {
-                // Signed distance numerator: cross(lb-la, p-la). Dividing by
-                // |lb-la| would be more physically meaningful but keeps the
-                // residual well-scaled at zero, so leave it polynomial.
-                let d = lb - la;
-                let q = p - la;
-                out.push(d.x * q.y - d.y * q.x);
-            } else if let Some((c, r)) = curve_center_radius(x, layout, entity) {
-                out.push((p - c).length() - r);
+            if let Some(point) = entity_point(x, layout, point) {
+                if let Some((line_a, line_b)) = line_points(x, layout, entity) {
+                    let delta = line_b - line_a;
+                    let query = point - line_a;
+                    (vec![delta.x * query.y - delta.y * query.x], true)
+                } else if let Some((center, radius)) = curve_center_radius(x, layout, entity) {
+                    (vec![(point - center).length() - radius], true)
+                } else {
+                    (Vec::new(), false)
+                }
+            } else {
+                (Vec::new(), false)
             }
         }
         Constraint::Horizontal { entity } => {
             if let Some((a, b)) = line_points(x, layout, entity) {
-                out.push(a.y - b.y);
+                (vec![a.y - b.y], true)
+            } else {
+                (Vec::new(), false)
             }
         }
         Constraint::Vertical { entity } => {
             if let Some((a, b)) = line_points(x, layout, entity) {
-                out.push(a.x - b.x);
+                (vec![a.x - b.x], true)
+            } else {
+                (Vec::new(), false)
             }
         }
         Constraint::Parallel { a, b } => {
@@ -347,7 +465,9 @@ fn append_residual(out: &mut Vec<f64>, x: &[f64], layout: &DofLayout, c: &Constr
             {
                 let da = a2 - a1;
                 let db = b2 - b1;
-                out.push(da.x * db.y - da.y * db.x);
+                (vec![da.x * db.y - da.y * db.x], true)
+            } else {
+                (Vec::new(), false)
             }
         }
         Constraint::Perpendicular { a, b } => {
@@ -356,27 +476,35 @@ fn append_residual(out: &mut Vec<f64>, x: &[f64], layout: &DofLayout, c: &Constr
             {
                 let da = a2 - a1;
                 let db = b2 - b1;
-                out.push(da.x * db.x + da.y * db.y);
+                (vec![da.x * db.x + da.y * db.y], true)
+            } else {
+                (Vec::new(), false)
             }
         }
         Constraint::Tangent { line, curve } => {
-            if let (Some((la, lb)), Some((c, r))) = (
+            if let (Some((line_a, line_b)), Some((center, radius))) = (
                 line_points(x, layout, line),
                 curve_center_radius(x, layout, curve),
             ) {
-                // |cross(lb-la, c-la)|^2 == r^2 * |lb-la|^2   ⇒   residual = cross^2 - r^2 * |d|^2
-                let d = lb - la;
-                let q = c - la;
-                let cr = d.x * q.y - d.y * q.x;
-                let len_sq = d.length_squared();
-                out.push(cr * cr - r * r * len_sq);
+                let delta = line_b - line_a;
+                let query = center - line_a;
+                let cross = delta.x * query.y - delta.y * query.x;
+                let len_sq = delta.length_squared();
+                (vec![cross * cross - radius * radius * len_sq], true)
+            } else {
+                (Vec::new(), false)
             }
         }
         Constraint::EqualLength { a, b } => {
             if let (Some((a1, a2)), Some((b1, b2))) =
                 (line_points(x, layout, a), line_points(x, layout, b))
             {
-                out.push((a2 - a1).length_squared() - (b2 - b1).length_squared());
+                (
+                    vec![(a2 - a1).length_squared() - (b2 - b1).length_squared()],
+                    true,
+                )
+            } else {
+                (Vec::new(), false)
             }
         }
         Constraint::EqualRadius { a, b } => {
@@ -384,9 +512,19 @@ fn append_residual(out: &mut Vec<f64>, x: &[f64], layout: &DofLayout, c: &Constr
                 curve_center_radius(x, layout, a),
                 curve_center_radius(x, layout, b),
             ) {
-                out.push(ra - rb);
+                (vec![ra - rb], true)
+            } else {
+                (Vec::new(), false)
             }
         }
+    };
+
+    ConstraintEvaluation {
+        id,
+        constraint: *constraint,
+        residual_norm: vec_norm(&residuals),
+        residuals,
+        valid,
     }
 }
 
@@ -395,7 +533,7 @@ fn append_residual(out: &mut Vec<f64>, x: &[f64], layout: &DofLayout, c: &Constr
 fn numerical_jacobian(
     x: &[f64],
     layout: &DofLayout,
-    constraints: &[Constraint],
+    constraints: &[(ConstraintId, Constraint)],
     r0: &[f64],
 ) -> Matrix {
     let m = r0.len();
@@ -406,10 +544,9 @@ fn numerical_jacobian(
         let original = x_pert[k];
         let h = JACOBIAN_H.max(original.abs() * JACOBIAN_H);
         x_pert[k] = original + h;
-        let r_pert = residuals(&x_pert, layout, constraints);
+        let r_pert = residual_vector(&evaluate_constraints(&x_pert, layout, constraints));
         x_pert[k] = original;
         if r_pert.len() != m {
-            // Shouldn't happen — a perturbation doesn't add/remove handles.
             continue;
         }
         for i in 0..m {
@@ -438,6 +575,7 @@ impl Matrix {
 
 impl std::ops::Index<(usize, usize)> for Matrix {
     type Output = f64;
+
     fn index(&self, (r, c): (usize, usize)) -> &f64 {
         &self.data[r * self.cols + c]
     }
@@ -454,11 +592,11 @@ fn jtj(j: &Matrix) -> Matrix {
     let mut out = Matrix::zeros(n, n);
     for r in 0..n {
         for c in 0..n {
-            let mut s = 0.0;
+            let mut sum = 0.0;
             for k in 0..j.rows {
-                s += j[(k, r)] * j[(k, c)];
+                sum += j[(k, r)] * j[(k, c)];
             }
-            out[(r, c)] = s;
+            out[(r, c)] = sum;
         }
     }
     out
@@ -468,11 +606,11 @@ fn jtv(j: &Matrix, v: &[f64]) -> Vec<f64> {
     let n = j.cols;
     let mut out = vec![0.0; n];
     for c in 0..n {
-        let mut s = 0.0;
+        let mut sum = 0.0;
         for r in 0..j.rows {
-            s += j[(r, c)] * v[r];
+            sum += j[(r, c)] * v[r];
         }
-        out[c] = s;
+        out[c] = sum;
     }
     out
 }
@@ -485,25 +623,26 @@ fn damped_symmetric(m: &Matrix, lambda: f64) -> Matrix {
     out
 }
 
-/// Gauss elimination with partial pivoting. Returns None on singular.
 fn solve_linear_system(mut a: Matrix, mut b: Vec<f64>) -> Option<Vec<f64>> {
     let n = a.rows;
     if a.cols != n || b.len() != n {
         return None;
     }
+
     for i in 0..n {
         let mut pivot_row = i;
         let mut pivot_val = a[(i, i)].abs();
         for r in (i + 1)..n {
-            let v = a[(r, i)].abs();
-            if v > pivot_val {
-                pivot_val = v;
+            let value = a[(r, i)].abs();
+            if value > pivot_val {
+                pivot_val = value;
                 pivot_row = r;
             }
         }
         if pivot_val < 1e-18 {
             return None;
         }
+
         if pivot_row != i {
             for c in 0..n {
                 let tmp = a[(i, c)];
@@ -512,6 +651,7 @@ fn solve_linear_system(mut a: Matrix, mut b: Vec<f64>) -> Option<Vec<f64>> {
             }
             b.swap(i, pivot_row);
         }
+
         for r in (i + 1)..n {
             let factor = a[(r, i)] / a[(i, i)];
             for c in i..n {
@@ -520,15 +660,73 @@ fn solve_linear_system(mut a: Matrix, mut b: Vec<f64>) -> Option<Vec<f64>> {
             b[r] -= factor * b[i];
         }
     }
+
     let mut x = vec![0.0; n];
     for i in (0..n).rev() {
-        let mut s = b[i];
+        let mut sum = b[i];
         for c in (i + 1)..n {
-            s -= a[(i, c)] * x[c];
+            sum -= a[(i, c)] * x[c];
         }
-        x[i] = s / a[(i, i)];
+        x[i] = sum / a[(i, i)];
     }
+
     Some(x)
+}
+
+fn matrix_rank(m: &Matrix, tol: f64) -> usize {
+    let mut a = m.clone();
+    let mut rank = 0;
+    let scale = a
+        .data
+        .iter()
+        .copied()
+        .map(f64::abs)
+        .fold(0.0_f64, f64::max)
+        .max(1.0);
+    let threshold = tol * scale;
+    let mut row = 0;
+
+    for col in 0..a.cols {
+        if row >= a.rows {
+            break;
+        }
+
+        let mut pivot_row = row;
+        let mut pivot_val = a[(row, col)].abs();
+        for candidate in (row + 1)..a.rows {
+            let value = a[(candidate, col)].abs();
+            if value > pivot_val {
+                pivot_val = value;
+                pivot_row = candidate;
+            }
+        }
+        if pivot_val <= threshold {
+            continue;
+        }
+
+        if pivot_row != row {
+            for c in 0..a.cols {
+                let tmp = a[(row, c)];
+                a[(row, c)] = a[(pivot_row, c)];
+                a[(pivot_row, c)] = tmp;
+            }
+        }
+
+        for candidate in (row + 1)..a.rows {
+            let factor = a[(candidate, col)] / a[(row, col)];
+            if factor.abs() <= threshold {
+                continue;
+            }
+            for c in col..a.cols {
+                a[(candidate, c)] -= factor * a[(row, c)];
+            }
+        }
+
+        rank += 1;
+        row += 1;
+    }
+
+    rank
 }
 
 fn vec_norm(v: &[f64]) -> f64 {
@@ -553,14 +751,14 @@ mod tests {
     }
 
     #[test]
-    fn solver_on_already_horizontal_line_is_noop() {
+    fn solver_on_already_horizontal_line_is_underdefined() {
         let mut sketch = new_sketch();
         let id = sketch.add(line(dvec2(0.0, 2.0), dvec2(10.0, 2.0)));
         sketch.add_constraint(Constraint::Horizontal { entity: id });
 
         let report = solve_sketch(&mut sketch);
 
-        assert_eq!(report.status, SolveStatus::Converged);
+        assert_eq!(report.status, SolveStatus::Underdefined);
         let SketchEntity::Line { a, b } = *sketch.entities.get(id).unwrap() else {
             panic!()
         };
@@ -575,7 +773,7 @@ mod tests {
 
         let report = solve_sketch(&mut sketch);
 
-        assert_eq!(report.status, SolveStatus::Converged);
+        assert_eq!(report.status, SolveStatus::Underdefined);
         let SketchEntity::Line { a, b } = *sketch.entities.get(id).unwrap() else {
             panic!()
         };
@@ -609,7 +807,6 @@ mod tests {
     #[test]
     fn solver_makes_perpendicular() {
         let mut sketch = new_sketch();
-        // Start with two slightly-off-perpendicular lines sharing an endpoint.
         let l1 = sketch.add(line(dvec2(0.0, 0.0), dvec2(10.0, 0.0)));
         let l2 = sketch.add(line(dvec2(0.0, 0.0), dvec2(0.5, 10.0)));
         sketch.add_constraint(Constraint::Perpendicular { a: l1, b: l2 });
@@ -676,11 +873,48 @@ mod tests {
     }
 
     #[test]
-    fn solver_returns_trivial_when_no_constraints() {
+    fn solver_returns_underdefined_when_no_constraints() {
         let mut sketch = new_sketch();
         sketch.add(line(dvec2(0.0, 0.0), dvec2(10.0, 5.0)));
+
         let report = solve_sketch(&mut sketch);
-        assert_eq!(report.status, SolveStatus::Trivial);
+
+        assert_eq!(report.status, SolveStatus::Underdefined);
+    }
+
+    #[test]
+    fn conflicting_constraints_are_reported() {
+        let mut sketch = new_sketch();
+        let id = sketch.add(line(dvec2(0.0, 0.0), dvec2(10.0, 5.0)));
+        sketch.add_constraint(Constraint::Horizontal { entity: id });
+
+        let report = solve_sketch_with(&mut sketch, 0, DEFAULT_TOLERANCE);
+
+        assert_eq!(report.status, SolveStatus::Conflicting);
+        assert!(report.unsatisfied_count >= 1);
+        assert!(report
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.kind == ConstraintDiagnosticKind::Unsatisfied));
+    }
+
+    #[test]
+    fn invalid_constraint_is_reported_as_failed() {
+        let mut sketch = new_sketch();
+        let circle = sketch.add(SketchEntity::Circle {
+            center: dvec2(0.0, 0.0),
+            radius: 3.0,
+        });
+        sketch.add_constraint(Constraint::Horizontal { entity: circle });
+
+        let report = solve_sketch(&mut sketch);
+
+        assert_eq!(report.status, SolveStatus::Failed);
+        assert_eq!(report.failed_count, 1);
+        assert!(report
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.kind == ConstraintDiagnosticKind::Failed));
     }
 
     #[test]
@@ -698,9 +932,6 @@ mod tests {
 
         solve_sketch(&mut sketch);
 
-        // The line is free to move too, so we don't assert the center lands
-        // on y=0 — only that the center ends up *on the line* in its final
-        // position (cross product ≈ 0).
         let SketchEntity::Line { a, b } = *sketch.entities.get(l).unwrap() else {
             panic!()
         };

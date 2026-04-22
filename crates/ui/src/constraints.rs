@@ -2,10 +2,13 @@ use egui::{Align, Button, Frame, Margin, RichText, Stroke, Ui};
 use egui_phosphor::regular as ph;
 use roncad_core::{
     constraint::Constraint,
-    ids::{SketchEntityId, SketchId},
+    ids::{ConstraintId, SketchEntityId, SketchId},
     selection::{Selection, SelectionItem},
 };
-use roncad_geometry::{closed_profiles, Sketch, SketchDimension, SketchEntity, SolveStatus};
+use roncad_geometry::{
+    closed_profiles, ConstraintDiagnostic, ConstraintDiagnosticKind, Sketch, SketchDimension,
+    SketchEntity, SolveReport, SolveStatus,
+};
 use slotmap::Key;
 
 use crate::shell::{ShellContext, ShellResponse};
@@ -36,6 +39,10 @@ pub fn render_constraints_section(
     let profile_count = closed_profiles(sketch).len();
     let dimension_count = sketch.dimensions.len();
     let constraint_count = sketch.constraints.len();
+    let diagnostics = shell
+        .last_solve_report
+        .map(|report| report.diagnostics.as_slice())
+        .unwrap_or(&[]);
     let selected_entities = selected_sketch_entities(shell.selection, sketch_id);
     let entity_only_selection = selected_entities.len() == shell.selection.len();
     let actions = if entity_only_selection {
@@ -73,6 +80,29 @@ pub fn render_constraints_section(
     );
     stat_row(
         ui,
+        "Issues",
+        &diagnostics.len().to_string(),
+        if diagnostics.is_empty() {
+            ThemeColors::TEXT_MID
+        } else {
+            diagnostic_color(Some(diagnostics[0].kind))
+        },
+    );
+    stat_row(ui, "Solver", &solver_label(shell), solver_color(shell));
+    if let Some(report) = shell.last_solve_report {
+        stat_row(
+            ui,
+            "Free DOF",
+            &report.estimated_free_dofs.to_string(),
+            if report.estimated_free_dofs > 0 {
+                ThemeColors::ACCENT
+            } else {
+                ThemeColors::TEXT_MID
+            },
+        );
+    }
+    stat_row(
+        ui,
         "Closed profiles",
         &profile_count.to_string(),
         if profile_count > 0 {
@@ -81,7 +111,6 @@ pub fn render_constraints_section(
             ThemeColors::TEXT_MID
         },
     );
-    stat_row(ui, "Solver", &solver_label(shell), solver_color(shell));
 
     ui.add_space(8.0);
     ui.colored_label(
@@ -106,19 +135,41 @@ pub fn render_constraints_section(
     }
 
     ui.add_space(8.0);
+    if !diagnostics.is_empty() {
+        relation_list(
+            ui,
+            "Problem constraints",
+            diagnostic_color(diagnostics.first().map(|item| item.kind)),
+            diagnostics.len(),
+            |ui| {
+                for (index, diagnostic) in diagnostics.iter().take(PREVIEW_ROW_LIMIT).enumerate() {
+                    ui.push_id(("constraint_problem_row", index), |ui| {
+                        constraint_row(ui, sketch, &diagnostic.constraint, Some(diagnostic));
+                    });
+                }
+            },
+        );
+        ui.add_space(8.0);
+    }
+
     relation_list(
         ui,
         "Constraints",
         ThemeColors::ACCENT,
         constraint_count,
         |ui| {
-            for (index, (_, constraint)) in sketch
+            for (index, (constraint_id, constraint)) in sketch
                 .iter_constraints()
                 .take(PREVIEW_ROW_LIMIT)
                 .enumerate()
             {
                 ui.push_id(("constraint_row", index), |ui| {
-                    constraint_row(ui, sketch, constraint);
+                    constraint_row(
+                        ui,
+                        sketch,
+                        constraint,
+                        diagnostic_for_constraint(shell.last_solve_report, constraint_id),
+                    );
                 });
             }
         },
@@ -359,15 +410,29 @@ fn stat_row(ui: &mut Ui, label: &str, value: &str, color: egui::Color32) {
     });
 }
 
-fn constraint_row(ui: &mut Ui, sketch: &Sketch, constraint: &Constraint) {
+fn constraint_row(
+    ui: &mut Ui,
+    sketch: &Sketch,
+    constraint: &Constraint,
+    diagnostic: Option<&ConstraintDiagnostic>,
+) {
+    let accent = diagnostic_color(diagnostic.map(|item| item.kind));
+    let stroke = Stroke::new(
+        1.0,
+        if diagnostic.is_some() {
+            accent.gamma_multiply(0.75)
+        } else {
+            ThemeColors::SEPARATOR_SOFT
+        },
+    );
     Frame::new()
         .fill(ThemeColors::BG_PANEL_ALT)
-        .stroke(Stroke::new(1.0, ThemeColors::SEPARATOR_SOFT))
+        .stroke(stroke)
         .inner_margin(Margin::symmetric(6, 5))
         .show(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.colored_label(
-                    ThemeColors::ACCENT,
+                    accent,
                     RichText::new(constraint_glyph(constraint)).size(11.5),
                 );
                 ui.label(
@@ -376,6 +441,15 @@ fn constraint_row(ui: &mut Ui, sketch: &Sketch, constraint: &Constraint) {
                         .color(ThemeColors::TEXT),
                 );
                 ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
+                    if let Some(diagnostic) = diagnostic {
+                        ui.colored_label(
+                            accent,
+                            RichText::new(format!("r={:.2e}", diagnostic.residual_norm))
+                                .size(10.0)
+                                .monospace(),
+                        );
+                        ui.add_space(8.0);
+                    }
                     ui.colored_label(
                         ThemeColors::TEXT_DIM,
                         RichText::new(constraint_targets(sketch, constraint))
@@ -384,6 +458,13 @@ fn constraint_row(ui: &mut Ui, sketch: &Sketch, constraint: &Constraint) {
                     );
                 });
             });
+            if let Some(diagnostic) = diagnostic {
+                ui.add_space(2.0);
+                ui.colored_label(
+                    accent,
+                    RichText::new(constraint_problem_label(diagnostic.kind)).size(10.5),
+                );
+            }
         });
 }
 
@@ -439,9 +520,10 @@ fn selection_hint(selection_len: usize) -> &'static str {
 fn solver_label(shell: &ShellContext<'_>) -> String {
     match shell.last_solve_report {
         Some(report) => match report.status {
-            SolveStatus::Converged => format!("OK · {} iters", report.iterations),
-            SolveStatus::MaxItersReached => format!("Limit · {} iters", report.iterations),
-            SolveStatus::Trivial => "Idle".to_string(),
+            SolveStatus::Underdefined => "Underdefined".to_string(),
+            SolveStatus::Solved => "Solved".to_string(),
+            SolveStatus::Conflicting => "Conflicting".to_string(),
+            SolveStatus::Failed => "Failed".to_string(),
         },
         None => "Idle".to_string(),
     }
@@ -449,9 +531,36 @@ fn solver_label(shell: &ShellContext<'_>) -> String {
 
 fn solver_color(shell: &ShellContext<'_>) -> egui::Color32 {
     match shell.last_solve_report.map(|report| report.status) {
-        Some(SolveStatus::Converged) => ThemeColors::ACCENT,
-        Some(SolveStatus::MaxItersReached) => ThemeColors::ACCENT_AMBER,
-        Some(SolveStatus::Trivial) | None => ThemeColors::TEXT_DIM,
+        Some(SolveStatus::Underdefined) => ThemeColors::ACCENT,
+        Some(SolveStatus::Solved) => ThemeColors::ACCENT_GREEN,
+        Some(SolveStatus::Conflicting) => ThemeColors::ACCENT_AMBER,
+        Some(SolveStatus::Failed) => ThemeColors::ACCENT_RED,
+        None => ThemeColors::TEXT_DIM,
+    }
+}
+
+fn diagnostic_for_constraint<'a>(
+    report: Option<&'a SolveReport>,
+    constraint_id: ConstraintId,
+) -> Option<&'a ConstraintDiagnostic> {
+    report?
+        .diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.id == constraint_id)
+}
+
+fn diagnostic_color(kind: Option<ConstraintDiagnosticKind>) -> egui::Color32 {
+    match kind {
+        Some(ConstraintDiagnosticKind::Unsatisfied) => ThemeColors::ACCENT_AMBER,
+        Some(ConstraintDiagnosticKind::Failed) => ThemeColors::ACCENT_RED,
+        None => ThemeColors::ACCENT,
+    }
+}
+
+fn constraint_problem_label(kind: ConstraintDiagnosticKind) -> &'static str {
+    match kind {
+        ConstraintDiagnosticKind::Unsatisfied => "Unsatisfied after solve",
+        ConstraintDiagnosticKind::Failed => "Could not evaluate",
     }
 }
 

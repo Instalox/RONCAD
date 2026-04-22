@@ -140,7 +140,7 @@ fn status_context(shell: &ShellContext<'_>) -> Option<(String, egui::Color32)> {
         }
     }
     if let Some(report) = shell.last_solve_report {
-        if report.status != SolveStatus::Trivial {
+        if report.constraint_count > 0 || report.failed_count > 0 || report.unsatisfied_count > 0 {
             return Some(solve_summary(report));
         }
     }
@@ -157,23 +157,37 @@ fn status_context(shell: &ShellContext<'_>) -> Option<(String, egui::Color32)> {
 
 fn solve_summary(report: &SolveReport) -> (String, egui::Color32) {
     let label = match report.status {
-        SolveStatus::Converged => "Solve converged",
-        SolveStatus::MaxItersReached => "Solve max iters",
-        SolveStatus::Trivial => "Solve trivial",
+        SolveStatus::Underdefined => "Underdefined",
+        SolveStatus::Solved => "Solved",
+        SolveStatus::Conflicting => "Conflicting",
+        SolveStatus::Failed => "Failed",
     };
     let color = match report.status {
-        SolveStatus::Converged => ThemeColors::ACCENT,
-        SolveStatus::MaxItersReached => ThemeColors::ACCENT_AMBER,
-        SolveStatus::Trivial => ThemeColors::TEXT_DIM,
+        SolveStatus::Underdefined => ThemeColors::ACCENT,
+        SolveStatus::Solved => ThemeColors::ACCENT_GREEN,
+        SolveStatus::Conflicting => ThemeColors::ACCENT_AMBER,
+        SolveStatus::Failed => ThemeColors::ACCENT_RED,
+    };
+    let detail = match report.status {
+        SolveStatus::Underdefined => format!(
+            "{} free DOF   {} constraints",
+            report.estimated_free_dofs, report.constraint_count
+        ),
+        SolveStatus::Solved => format!(
+            "{} constraints   {} iters",
+            report.constraint_count, report.iterations
+        ),
+        SolveStatus::Conflicting => format!(
+            "{} unsatisfied   {} constraints",
+            report.unsatisfied_count, report.constraint_count
+        ),
+        SolveStatus::Failed => format!(
+            "{} failed   {} constraints",
+            report.failed_count, report.constraint_count
+        ),
     };
 
-    (
-        format!(
-            "{label}   {} iters   r={:.2e}",
-            report.iterations, report.final_residual_norm
-        ),
-        color,
-    )
+    (format!("{label}   {detail}"), color)
 }
 
 fn status_hint(kind: ActiveToolKind, dynamic_active: bool) -> &'static str {
@@ -388,11 +402,16 @@ mod tests {
     #[test]
     fn solve_summary_formats_nontrivial_reports() {
         let (text, _) = solve_summary(&SolveReport {
-            status: SolveStatus::Converged,
+            status: SolveStatus::Solved,
             iterations: 7,
             final_residual_norm: 1.25e-9,
+            constraint_count: 4,
+            unsatisfied_count: 0,
+            failed_count: 0,
+            estimated_free_dofs: 0,
+            diagnostics: Vec::new(),
         });
 
-        assert_eq!(text, "Solve converged   7 iters   r=1.25e-9");
+        assert_eq!(text, "Solved   4 constraints   7 iters");
     }
 }

@@ -77,6 +77,7 @@ pub fn render_in_rect(
                 shell.camera,
                 shell.project,
                 shell.selection,
+                shell.last_solve_report,
                 interaction.hovered_target.as_ref(),
             );
             dimension_overlay::paint(
@@ -86,7 +87,13 @@ pub fn render_in_rect(
                 shell.project,
                 shell.selection,
             );
-            constraint_overlay::paint(ui.painter(), rect, shell.camera, shell.project);
+            constraint_overlay::paint(
+                ui.painter(),
+                rect,
+                shell.camera,
+                shell.project,
+                shell.last_solve_report,
+            );
             profile_overlay::paint(
                 ui.painter(),
                 rect,

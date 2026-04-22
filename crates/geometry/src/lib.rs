@@ -37,6 +37,9 @@ pub use project::Project;
 pub use sketch::Sketch;
 pub use sketch_dimension::SketchDimension;
 pub use sketch_entity::SketchEntity;
-pub use solver::{solve_sketch, solve_sketch_with, SolveReport, SolveStatus};
+pub use solver::{
+    solve_sketch, solve_sketch_with, ConstraintDiagnostic, ConstraintDiagnosticKind, SolveReport,
+    SolveStatus,
+};
 pub use topology::{ProfileKey, ProfileSpanKey, SketchTopology, TopologyEdge, TopologyProfile};
 pub use workplane::Workplane;

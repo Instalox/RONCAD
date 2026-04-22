@@ -26,8 +26,12 @@ impl ThemeColors {
     pub const TEXT_FAINT: Color32 = Color32::from_rgb(0x47, 0x4C, 0x56);
     pub const ACCENT: Color32 = Color32::from_rgb(0x4F, 0xA3, 0xF7);
     pub const ACCENT_DIM: Color32 = Color32::from_rgb(0x2C, 0x5E, 0x93);
+    pub const ACCENT_GREEN: Color32 = Color32::from_rgb(0x63, 0xC0, 0x7A);
+    pub const ACCENT_GREEN_DIM: Color32 = Color32::from_rgb(0x2F, 0x64, 0x3A);
     pub const ACCENT_AMBER: Color32 = Color32::from_rgb(0xE2, 0xA2, 0x46);
     pub const ACCENT_AMBER_DIM: Color32 = Color32::from_rgb(0x7C, 0x56, 0x22);
+    pub const ACCENT_RED: Color32 = Color32::from_rgb(0xDA, 0x6D, 0x6D);
+    pub const ACCENT_RED_DIM: Color32 = Color32::from_rgb(0x74, 0x31, 0x31);
     pub const GRID_MAJOR: Color32 = Color32::from_rgb(0x2F, 0x35, 0x3F);
     pub const GRID_MINOR: Color32 = Color32::from_rgb(0x22, 0x26, 0x2D);
     pub const GRID_DOT: Color32 = Color32::from_rgb(0x35, 0x3C, 0x47);
