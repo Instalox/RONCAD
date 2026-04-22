@@ -65,8 +65,9 @@ pub(super) fn paint(
                                         hud_segment(ui, key, label);
                                     }
 
-                                    if kind == ActiveToolKind::Extrude || kind == ActiveToolKind::Revolve
-                                        && shell.extrude_hud.is_open()
+                                    if kind == ActiveToolKind::Extrude
+                                        || kind == ActiveToolKind::Revolve
+                                            && shell.extrude_hud.is_open()
                                     {
                                         hud_sep(ui);
                                         hud_segment(ui, "Esc", "cancel");

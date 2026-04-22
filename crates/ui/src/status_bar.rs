@@ -1,6 +1,7 @@
 //! Bottom status bar: coordinates, zoom level, active-tool hint.
 
 use egui::{vec2, Align, Frame, Label, Layout, Margin, Rect, RichText, Stroke, Ui, UiBuilder};
+use roncad_geometry::{SolveReport, SolveStatus};
 use roncad_tools::{ActiveToolKind, ToolPreview};
 
 use crate::shell::{ShellContext, ShellResponse};
@@ -111,6 +112,16 @@ fn status_context(shell: &ShellContext<'_>) -> Option<(String, egui::Color32)> {
     if let Some(summary) = preview_summary(shell.tool_manager.preview()) {
         return Some((summary, ThemeColors::tool_accent(kind)));
     }
+    if let Some(text) = shell.status_text {
+        return Some((
+            text.to_string(),
+            if shell.status_is_error {
+                ThemeColors::ACCENT_AMBER
+            } else {
+                ThemeColors::ACCENT
+            },
+        ));
+    }
     if kind == ActiveToolKind::Extrude && shell.extrude_hud.is_open() {
         if let Some(draft) = shell.extrude_hud.active() {
             let distance = shell
@@ -128,6 +139,11 @@ fn status_context(shell: &ShellContext<'_>) -> Option<(String, egui::Color32)> {
             ));
         }
     }
+    if let Some(report) = shell.last_solve_report {
+        if report.status != SolveStatus::Trivial {
+            return Some(solve_summary(report));
+        }
+    }
     if !shell.selection.is_empty() {
         return Some((
             format!("{} selected", shell.selection.len()),
@@ -137,6 +153,27 @@ fn status_context(shell: &ShellContext<'_>) -> Option<(String, egui::Color32)> {
 
     let hint = status_hint(kind, !shell.tool_manager.dynamic_fields().is_empty());
     (!hint.is_empty()).then_some((hint.to_string(), ThemeColors::TEXT_DIM))
+}
+
+fn solve_summary(report: &SolveReport) -> (String, egui::Color32) {
+    let label = match report.status {
+        SolveStatus::Converged => "Solve converged",
+        SolveStatus::MaxItersReached => "Solve max iters",
+        SolveStatus::Trivial => "Solve trivial",
+    };
+    let color = match report.status {
+        SolveStatus::Converged => ThemeColors::ACCENT,
+        SolveStatus::MaxItersReached => ThemeColors::ACCENT_AMBER,
+        SolveStatus::Trivial => ThemeColors::TEXT_DIM,
+    };
+
+    (
+        format!(
+            "{label}   {} iters   r={:.2e}",
+            report.iterations, report.final_residual_norm
+        ),
+        color,
+    )
 }
 
 fn status_hint(kind: ActiveToolKind, dynamic_active: bool) -> &'static str {
@@ -242,9 +279,10 @@ fn preview_summary(preview: ToolPreview) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use glam::dvec2;
+    use roncad_geometry::{SolveReport, SolveStatus};
     use roncad_tools::ToolPreview;
 
-    use super::preview_summary;
+    use super::{preview_summary, solve_summary};
 
     #[test]
     fn line_preview_reports_length_delta_and_angle() {
@@ -345,5 +383,16 @@ mod tests {
             summary.as_deref(),
             Some("Fillet candidate   Preview R 2.000 mm   Max R 10.000 mm")
         );
+    }
+
+    #[test]
+    fn solve_summary_formats_nontrivial_reports() {
+        let (text, _) = solve_summary(&SolveReport {
+            status: SolveStatus::Converged,
+            iterations: 7,
+            final_residual_norm: 1.25e-9,
+        });
+
+        assert_eq!(text, "Solve converged   7 iters   r=1.25e-9");
     }
 }

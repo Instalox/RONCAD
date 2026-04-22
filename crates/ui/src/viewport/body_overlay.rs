@@ -45,7 +45,9 @@ pub(super) fn paint(
             };
             let mesh = match feature {
                 roncad_geometry::Feature::Extrude(f) => extrude_mesh(&f.profile, f.distance_mm),
-                roncad_geometry::Feature::Revolve(f) => revolve_mesh(&f.profile, f.axis_origin, f.axis_dir, f.angle_rad),
+                roncad_geometry::Feature::Revolve(f) => {
+                    revolve_mesh(&f.profile, f.axis_origin, f.axis_dir, f.angle_rad)
+                }
             };
 
             for triangle in mesh.triangles {
@@ -158,12 +160,20 @@ impl BodyPalette {
     fn for_selection(selected: bool) -> Self {
         if selected {
             Self {
-                diffuse_rgb: [0x56 as f32 / 255.0, 0xA6 as f32 / 255.0, 0xF0 as f32 / 255.0],
+                diffuse_rgb: [
+                    0x56 as f32 / 255.0,
+                    0xA6 as f32 / 255.0,
+                    0xF0 as f32 / 255.0,
+                ],
                 selected: true,
             }
         } else {
             Self {
-                diffuse_rgb: [0x8D as f32 / 255.0, 0x98 as f32 / 255.0, 0xA8 as f32 / 255.0],
+                diffuse_rgb: [
+                    0x8D as f32 / 255.0,
+                    0x98 as f32 / 255.0,
+                    0xA8 as f32 / 255.0,
+                ],
                 selected: false,
             }
         }

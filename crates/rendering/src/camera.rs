@@ -413,7 +413,9 @@ impl Camera2d {
     fn normalize_angles(&mut self) {
         let two_pi = std::f64::consts::TAU;
         self.yaw_radians = self.yaw_radians.rem_euclid(two_pi);
-        self.pitch_radians = self.pitch_radians.clamp(-PITCH_LIMIT_RADIANS, PITCH_LIMIT_RADIANS);
+        self.pitch_radians = self
+            .pitch_radians
+            .clamp(-PITCH_LIMIT_RADIANS, PITCH_LIMIT_RADIANS);
     }
 
     fn basis(&self) -> (DVec3, DVec3, DVec3) {
@@ -462,7 +464,6 @@ impl Camera2d {
 fn workplane_translation(workplane: &Workplane, delta_mm: DVec2) -> DVec3 {
     workplane.u.normalize() * delta_mm.x + workplane.v.normalize() * delta_mm.y
 }
-
 
 fn bounds_corners(min_mm: DVec3, max_mm: DVec3) -> [DVec3; 8] {
     [
@@ -557,12 +558,8 @@ mod tests {
         camera.set_orientation_immediate(FRAC_PI_2, FRAC_PI_2);
         let center = dvec2(400.0, 300.0);
 
-        let plus_x = camera
-            .project_point(dvec3(10.0, 0.0, 0.0), center)
-            .unwrap();
-        let plus_y = camera
-            .project_point(dvec3(0.0, 10.0, 0.0), center)
-            .unwrap();
+        let plus_x = camera.project_point(dvec3(10.0, 0.0, 0.0), center).unwrap();
+        let plus_y = camera.project_point(dvec3(0.0, 10.0, 0.0), center).unwrap();
 
         // +X should appear to the right of center, +Y should appear above center
         // (note: egui screen y grows downward, so "above" means smaller y).

@@ -170,9 +170,10 @@ mod tests {
 
         infer_constraints(&mut sketch, line);
 
-        assert!(!sketch
-            .iter_constraints()
-            .any(|(_, c)| matches!(c, Constraint::Horizontal { .. } | Constraint::Vertical { .. })));
+        assert!(!sketch.iter_constraints().any(|(_, c)| matches!(
+            c,
+            Constraint::Horizontal { .. } | Constraint::Vertical { .. }
+        )));
     }
 
     #[test]

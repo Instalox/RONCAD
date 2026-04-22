@@ -188,11 +188,15 @@ pub(super) fn paint(
         let cx = face.normal.dot(right) as f32;
         let cy = face.normal.dot(up) as f32;
         let text_pos = center + Vec2::new(cx, -cy) * CUBE_RADIUS;
-        
+
         // Smooth label fading: fully visible at dot=-1, fading out at dot=-0.15
         let label_alpha = ((-dot - 0.15) / 0.85).clamp(0.0, 1.0) as f32;
         if label_alpha > 0.01 {
-            let base_color = if is_hovered { ThemeColors::TEXT } else { ThemeColors::TEXT_DIM };
+            let base_color = if is_hovered {
+                ThemeColors::TEXT
+            } else {
+                ThemeColors::TEXT_DIM
+            };
             let label_color = base_color.gamma_multiply(label_alpha);
             ui.painter().text(
                 text_pos,
@@ -213,26 +217,26 @@ pub(super) fn paint(
     // Projection toggle button
     let toggle_pos = center + Vec2::new(CUBE_RADIUS * 1.5, CUBE_RADIUS * 1.5);
     let toggle_rect = Rect::from_center_size(toggle_pos, Vec2::splat(24.0));
-    let toggle_interact = ui.interact(toggle_rect, ui.id().with("proj_toggle"), egui::Sense::click());
-    
+    let toggle_interact = ui.interact(
+        toggle_rect,
+        ui.id().with("proj_toggle"),
+        egui::Sense::click(),
+    );
+
     let is_ortho = shell.camera.projection() == roncad_rendering::Projection::Orthographic;
     let icon = if is_ortho {
         egui_phosphor::regular::SQUARE // representing 2D Orthographic
     } else {
         egui_phosphor::regular::CUBE // representing 3D Perspective
     };
-    
+
     let toggle_bg = if toggle_interact.hovered() {
         ThemeColors::BG_HOVER
     } else {
         ThemeColors::BG_PANEL_GLASS
     };
 
-    ui.painter().rect_filled(
-        toggle_rect,
-        4.0,
-        toggle_bg,
-    );
+    ui.painter().rect_filled(toggle_rect, 4.0, toggle_bg);
     ui.painter().rect_stroke(
         toggle_rect,
         4.0,
@@ -244,45 +248,49 @@ pub(super) fn paint(
         egui::Align2::CENTER_CENTER,
         icon,
         egui::FontId::proportional(14.0),
-        if toggle_interact.hovered() { ThemeColors::TEXT } else { ThemeColors::TEXT_DIM },
+        if toggle_interact.hovered() {
+            ThemeColors::TEXT
+        } else {
+            ThemeColors::TEXT_DIM
+        },
     );
 
     if toggle_interact.clicked() {
         shell.camera.toggle_projection();
     }
-    
+
     // Draw Axis Lines (X, Y, Z)
     let axes_origin = center + Vec2::new(-CUBE_RADIUS * 1.5, CUBE_RADIUS * 1.5);
     let axis_length = 20.0;
-    
+
     let axes = [
         (DVec3::X, ThemeColors::GRID_AXIS_X, "X"),
         (DVec3::Y, ThemeColors::GRID_AXIS_Y, "Y"),
         (DVec3::Z, ThemeColors::ACCENT, "Z"),
     ];
-    
+
     // Sort axes so ones pointing towards camera are drawn last
     let mut sorted_axes = axes.to_vec();
     sorted_axes.sort_by(|a, b| {
         let dot_a = a.0.dot(forward);
         let dot_b = b.0.dot(forward);
-        dot_b.partial_cmp(&dot_a).unwrap_or(std::cmp::Ordering::Equal)
+        dot_b
+            .partial_cmp(&dot_a)
+            .unwrap_or(std::cmp::Ordering::Equal)
     });
-    
+
     for (dir, color, label) in sorted_axes {
         let x = dir.dot(right) as f32;
         let y = dir.dot(up) as f32;
         let end = axes_origin + Vec2::new(x, -y) * axis_length;
-        
-        ui.painter().line_segment(
-            [axes_origin, end],
-            Stroke::new(2.0, color),
-        );
-        
-        let len_sq = x*x + y*y;
+
+        ui.painter()
+            .line_segment([axes_origin, end], Stroke::new(2.0, color));
+
+        let len_sq = x * x + y * y;
         if len_sq > 0.01 {
-             let label_dir = Vec2::new(x, -y).normalized();
-             ui.painter().text(
+            let label_dir = Vec2::new(x, -y).normalized();
+            ui.painter().text(
                 end + label_dir * 8.0,
                 egui::Align2::CENTER_CENTER,
                 label,
@@ -298,7 +306,10 @@ fn is_point_in_polygon(p: Pos2, polygon: &[Pos2]) -> bool {
     let mut j = polygon.len() - 1;
     for i in 0..polygon.len() {
         if (polygon[i].y > p.y) != (polygon[j].y > p.y)
-            && p.x < (polygon[j].x - polygon[i].x) * (p.y - polygon[i].y) / (polygon[j].y - polygon[i].y) + polygon[i].x
+            && p.x
+                < (polygon[j].x - polygon[i].x) * (p.y - polygon[i].y)
+                    / (polygon[j].y - polygon[i].y)
+                    + polygon[i].x
         {
             inside = !inside;
         }

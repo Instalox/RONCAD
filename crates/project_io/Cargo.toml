@@ -12,6 +12,8 @@ path = "src/lib.rs"
 [dependencies]
 roncad-core.workspace = true
 roncad-geometry.workspace = true
+glam.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+slotmap.workspace = true
 thiserror.workspace = true

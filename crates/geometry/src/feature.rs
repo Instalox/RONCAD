@@ -78,7 +78,8 @@ impl Feature {
                 // Find distance from centroid to the axis line (axis_origin, axis_dir)
                 let to_centroid = centroid - feature.axis_origin;
                 // cross product in 2d gives distance to line if direction is normalized
-                let r = (to_centroid.x * feature.axis_dir.y - to_centroid.y * feature.axis_dir.x).abs();
+                let r =
+                    (to_centroid.x * feature.axis_dir.y - to_centroid.y * feature.axis_dir.x).abs();
                 self.area_mm2() * feature.angle_rad.abs() * r
             }
         }
@@ -108,10 +109,11 @@ impl Feature {
                 let mut max_r = 0.0_f64;
                 for corner in corners {
                     let to_corner = corner - feature.axis_origin;
-                    let r = (to_corner.x * feature.axis_dir.y - to_corner.y * feature.axis_dir.x).abs();
+                    let r =
+                        (to_corner.x * feature.axis_dir.y - to_corner.y * feature.axis_dir.x).abs();
                     max_r = max_r.max(r);
                 }
-                
+
                 // For a full revolve, the shape sweeps through space.
                 // A conservative bound is a cylinder along the axis.
                 // Assuming axis is in the XY plane.

@@ -15,12 +15,7 @@ const GLYPH_COLOR: Color32 = Color32::from_rgb(0x9F, 0xBF, 0xDF);
 const GLYPH_SHADOW: Color32 = Color32::from_rgb(0x00, 0x00, 0x00);
 const GLYPH_OFFSET_PX: f32 = 10.0;
 
-pub(super) fn paint(
-    painter: &egui::Painter,
-    rect: Rect,
-    camera: &Camera2d,
-    project: &Project,
-) {
+pub(super) fn paint(painter: &egui::Painter, rect: Rect, camera: &Camera2d, project: &Project) {
     let Some(sketch) = project.active_sketch() else {
         return;
     };
@@ -31,7 +26,9 @@ pub(super) fn paint(
     let font = FontId::monospace(10.0);
 
     for (_, constraint) in sketch.iter_constraints() {
-        paint_constraint(painter, camera, center, workplane, sketch, constraint, &font);
+        paint_constraint(
+            painter, camera, center, workplane, sketch, constraint, &font,
+        );
     }
 }
 
@@ -68,14 +65,18 @@ fn paint_constraint(
         Constraint::Parallel { a, b } => {
             for (i, line) in [a, b].iter().enumerate() {
                 if let Some(point) = line_midpoint(sketch, *line) {
-                    glyph_at(painter, camera, center, workplane, point, "∥", i as i32, font);
+                    glyph_at(
+                        painter, camera, center, workplane, point, "∥", i as i32, font,
+                    );
                 }
             }
         }
         Constraint::Perpendicular { a, b } => {
             for (i, line) in [a, b].iter().enumerate() {
                 if let Some(point) = line_midpoint(sketch, *line) {
-                    glyph_at(painter, camera, center, workplane, point, "⊥", i as i32, font);
+                    glyph_at(
+                        painter, camera, center, workplane, point, "⊥", i as i32, font,
+                    );
                 }
             }
         }
@@ -90,14 +91,18 @@ fn paint_constraint(
         Constraint::EqualLength { a, b } => {
             for (i, line) in [a, b].iter().enumerate() {
                 if let Some(point) = line_midpoint(sketch, *line) {
-                    glyph_at(painter, camera, center, workplane, point, "=", i as i32, font);
+                    glyph_at(
+                        painter, camera, center, workplane, point, "=", i as i32, font,
+                    );
                 }
             }
         }
         Constraint::EqualRadius { a, b } => {
             for (i, curve) in [a, b].iter().enumerate() {
                 if let Some(point) = entity_center(sketch, *curve) {
-                    glyph_at(painter, camera, center, workplane, point, "R=", i as i32, font);
+                    glyph_at(
+                        painter, camera, center, workplane, point, "R=", i as i32, font,
+                    );
                 }
             }
         }
@@ -126,7 +131,13 @@ fn glyph_at(
         font.clone(),
         GLYPH_SHADOW,
     );
-    painter.text(anchor, Align2::LEFT_BOTTOM, label, font.clone(), GLYPH_COLOR);
+    painter.text(
+        anchor,
+        Align2::LEFT_BOTTOM,
+        label,
+        font.clone(),
+        GLYPH_COLOR,
+    );
 }
 
 fn dot_at(

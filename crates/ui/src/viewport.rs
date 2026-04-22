@@ -10,11 +10,11 @@ mod extrude_overlay;
 mod grid_overlay;
 mod hud_overlay;
 mod mini_hud;
+mod nav_gizmo;
 mod profile_overlay;
 mod sketch_overlay;
 mod snap_overlay;
 mod tool_overlay;
-mod nav_gizmo;
 
 use egui::{Color32, Frame, Pos2, Rect, Sense, Ui, UiBuilder};
 use glam::DVec2;

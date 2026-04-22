@@ -5,6 +5,7 @@ mod app;
 mod bootstrap;
 mod dispatcher;
 mod interaction_controller;
+mod settings;
 
 use app::RonCadApp;
 

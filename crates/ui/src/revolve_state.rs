@@ -26,7 +26,13 @@ impl RevolveHudState {
         }
     }
 
-    pub fn arm(&mut self, sketch: SketchId, profile: SketchProfile, axis_origin: DVec2, axis_dir: DVec2) {
+    pub fn arm(
+        &mut self,
+        sketch: SketchId,
+        profile: SketchProfile,
+        axis_origin: DVec2,
+        axis_dir: DVec2,
+    ) {
         self.active = Some(RevolveDraft {
             sketch,
             profile,

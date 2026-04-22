@@ -24,7 +24,6 @@ pub use arc::{
 pub use body::Body;
 pub use constraint::{resolve_entity_point, Constraint, EntityPoint};
 pub use constraint_inference::{infer_constraints, INFERENCE_EPSILON};
-pub use solver::{solve_sketch, solve_sketch_with, SolveReport, SolveStatus};
 pub use feature::{ExtrudeFeature, Feature};
 pub use fillet::{
     apply_line_fillet, fillet_candidate_for_lines, find_line_fillet_candidate,
@@ -37,4 +36,5 @@ pub use project::Project;
 pub use sketch::Sketch;
 pub use sketch_dimension::SketchDimension;
 pub use sketch_entity::SketchEntity;
+pub use solver::{solve_sketch, solve_sketch_with, SolveReport, SolveStatus};
 pub use workplane::Workplane;

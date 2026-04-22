@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use egui::{
     vec2, Align, Align2, Color32, Context, FontId, Frame, Id, Label, Layout, Margin, Modal,
     RichText, ScrollArea, Sense, Stroke, StrokeKind, TextEdit, Ui, UiBuilder, Vec2,
@@ -73,6 +75,12 @@ enum PaletteAction {
     Tool(ActiveToolKind),
     Command(AppCommand),
     FitView,
+    OpenProject,
+    OpenProjectByPath,
+    OpenProjectPath(PathBuf),
+    SaveProject,
+    SaveProjectAs,
+    SaveProjectAsByPath,
 }
 
 #[derive(Clone)]
@@ -144,6 +152,84 @@ pub fn render(ctx: &Context, shell: &mut ShellContext<'_>, response: &mut ShellR
 fn build_catalog(shell: &ShellContext<'_>) -> Vec<PaletteItem> {
     let mut items = Vec::new();
     let active_tool = shell.tool_manager.active_kind();
+    let file_detail = shell
+        .document_path
+        .map(|path| path.display().to_string())
+        .unwrap_or_else(|| "No file path yet".to_string());
+
+    items.push(PaletteItem {
+        group: "Project",
+        icon: ph::FOLDER_OPEN,
+        label: "Open project".to_string(),
+        detail: Some("Native file picker".to_string()),
+        shortcut: Some("Mod+O"),
+        search_text: "open load project file json".to_string(),
+        action: PaletteAction::OpenProject,
+    });
+    items.push(PaletteItem {
+        group: "Project",
+        icon: ph::TEXTBOX,
+        label: "Open project by path".to_string(),
+        detail: Some(file_detail.clone()),
+        shortcut: None,
+        search_text: "open load project file path json manual".to_string(),
+        action: PaletteAction::OpenProjectByPath,
+    });
+    items.push(PaletteItem {
+        group: "Project",
+        icon: ph::FLOPPY_DISK,
+        label: "Save project".to_string(),
+        detail: Some(if shell.document_dirty {
+            "Unsaved changes".to_string()
+        } else {
+            "Up to date".to_string()
+        }),
+        shortcut: Some("Mod+S"),
+        search_text: "save write project file json".to_string(),
+        action: PaletteAction::SaveProject,
+    });
+    items.push(PaletteItem {
+        group: "Project",
+        icon: ph::FLOPPY_DISK_BACK,
+        label: "Save project as".to_string(),
+        detail: Some("Native file picker".to_string()),
+        shortcut: Some("Mod+Shift+S"),
+        search_text: "save as write project file path json".to_string(),
+        action: PaletteAction::SaveProjectAs,
+    });
+    items.push(PaletteItem {
+        group: "Project",
+        icon: ph::TEXTBOX,
+        label: "Save project as path".to_string(),
+        detail: Some(file_detail),
+        shortcut: None,
+        search_text: "save as write project file path json manual".to_string(),
+        action: PaletteAction::SaveProjectAsByPath,
+    });
+
+    for path in shell.recent_files {
+        if shell
+            .document_path
+            .is_some_and(|current| current == path.as_path())
+        {
+            continue;
+        }
+
+        let file_name = path
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .filter(|name| !name.is_empty())
+            .unwrap_or_else(|| path.display().to_string());
+        items.push(PaletteItem {
+            group: "Recent",
+            icon: ph::FOLDER_OPEN,
+            label: format!("Open recent {}", file_name),
+            detail: Some(path.display().to_string()),
+            shortcut: None,
+            search_text: format!("recent open project {} {}", file_name, path.display()),
+            action: PaletteAction::OpenProjectPath(path.clone()),
+        });
+    }
 
     for tool in TOOLS {
         let detail = if *tool == active_tool {
@@ -447,6 +533,12 @@ fn run_action(action: PaletteAction, shell: &mut ShellContext<'_>, response: &mu
         PaletteAction::Tool(kind) => shell.tool_manager.set_active(kind),
         PaletteAction::Command(command) => response.commands.push(command),
         PaletteAction::FitView => response.fit_view_requested = true,
+        PaletteAction::OpenProject => response.open_project_requested = true,
+        PaletteAction::OpenProjectByPath => response.open_project_by_path_requested = true,
+        PaletteAction::OpenProjectPath(path) => response.open_project_path = Some(path),
+        PaletteAction::SaveProject => response.save_project_requested = true,
+        PaletteAction::SaveProjectAs => response.save_project_as_requested = true,
+        PaletteAction::SaveProjectAsByPath => response.save_project_as_path_requested = true,
     }
 }
 

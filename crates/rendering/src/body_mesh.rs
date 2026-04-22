@@ -245,7 +245,8 @@ pub fn revolve_mesh(
     let mut triangles = Vec::new();
     let mut edges = Vec::new();
 
-    let segments = ((angle_rad.abs() / std::f64::consts::TAU) * CIRCLE_SEGMENTS_MAX as f64).ceil() as usize;
+    let segments =
+        ((angle_rad.abs() / std::f64::consts::TAU) * CIRCLE_SEGMENTS_MAX as f64).ceil() as usize;
     let segments = segments.clamp(4, CIRCLE_SEGMENTS_MAX);
     let d_theta = angle_rad / segments as f64;
 
@@ -256,12 +257,12 @@ pub fn revolve_mesh(
         let p_rel = p - axis_origin;
         let u = p_rel.dot(e1);
         let v = p_rel.dot(e2);
-        
+
         let base = axis_origin + u * e1;
         let p_3d = DVec3::new(base.x, base.y, 0.0);
         let e2_3d = DVec3::new(e2.x, e2.y, 0.0);
         let e3_3d = DVec3::Z;
-        
+
         p_3d + v * theta.cos() * e2_3d + v * theta.sin() * e3_3d
     };
 
@@ -270,7 +271,7 @@ pub fn revolve_mesh(
         let v = n_2d.dot(e2);
         let e2_3d = DVec3::new(e2.x, e2.y, 0.0);
         let e3_3d = DVec3::Z;
-        
+
         DVec3::new(e1.x, e1.y, 0.0) * u + v * theta.cos() * e2_3d + v * theta.sin() * e3_3d
     };
 
@@ -300,8 +301,11 @@ pub fn revolve_mesh(
     let is_full_revolution = (angle_rad.abs() - std::f64::consts::TAU).abs() < PROFILE_EPSILON;
     if !is_full_revolution {
         let start_points: Vec<_> = outline_2d.iter().map(|p| revolve_point(*p, 0.0)).collect();
-        let end_points: Vec<_> = outline_2d.iter().map(|p| revolve_point(*p, angle_rad)).collect();
-        
+        let end_points: Vec<_> = outline_2d
+            .iter()
+            .map(|p| revolve_point(*p, angle_rad))
+            .collect();
+
         let start_normal = if angle_rad >= 0.0 {
             DVec3::new(e2.x, e2.y, 0.0)
         } else {
@@ -310,8 +314,16 @@ pub fn revolve_mesh(
         let end_normal = revolve_normal(if angle_rad >= 0.0 { -e2 } else { e2 }, angle_rad);
 
         for [a, b, c] in triangulate_polygon(&outline_2d) {
-            push_flat_triangle(&mut triangles, [start_points[a], start_points[b], start_points[c]], start_normal);
-            push_flat_triangle(&mut triangles, [end_points[a], end_points[b], end_points[c]], end_normal);
+            push_flat_triangle(
+                &mut triangles,
+                [start_points[a], start_points[b], start_points[c]],
+                start_normal,
+            );
+            push_flat_triangle(
+                &mut triangles,
+                [end_points[a], end_points[b], end_points[c]],
+                end_normal,
+            );
         }
     }
 
@@ -323,7 +335,7 @@ pub fn revolve_mesh(
 
         for index in 0..n {
             let next = (index + 1) % n;
-            
+
             let p0_0 = revolve_point(outline_2d[index], theta0);
             let p1_0 = revolve_point(outline_2d[next], theta0);
             let p1_1 = revolve_point(outline_2d[next], theta1);
@@ -352,31 +364,67 @@ pub fn revolve_mesh(
                 if flip {
                     triangles.push(MeshTriangle3d {
                         vertices: [
-                            MeshVertex3d { position: p0_0, normal: n0_0 },
-                            MeshVertex3d { position: p1_1, normal: n1_1 },
-                            MeshVertex3d { position: p1_0, normal: n1_0 },
+                            MeshVertex3d {
+                                position: p0_0,
+                                normal: n0_0,
+                            },
+                            MeshVertex3d {
+                                position: p1_1,
+                                normal: n1_1,
+                            },
+                            MeshVertex3d {
+                                position: p1_0,
+                                normal: n1_0,
+                            },
                         ],
                     });
                     triangles.push(MeshTriangle3d {
                         vertices: [
-                            MeshVertex3d { position: p0_0, normal: n0_0 },
-                            MeshVertex3d { position: p0_1, normal: n0_1 },
-                            MeshVertex3d { position: p1_1, normal: n1_1 },
+                            MeshVertex3d {
+                                position: p0_0,
+                                normal: n0_0,
+                            },
+                            MeshVertex3d {
+                                position: p0_1,
+                                normal: n0_1,
+                            },
+                            MeshVertex3d {
+                                position: p1_1,
+                                normal: n1_1,
+                            },
                         ],
                     });
                 } else {
                     triangles.push(MeshTriangle3d {
                         vertices: [
-                            MeshVertex3d { position: p0_0, normal: n0_0 },
-                            MeshVertex3d { position: p1_0, normal: n1_0 },
-                            MeshVertex3d { position: p1_1, normal: n1_1 },
+                            MeshVertex3d {
+                                position: p0_0,
+                                normal: n0_0,
+                            },
+                            MeshVertex3d {
+                                position: p1_0,
+                                normal: n1_0,
+                            },
+                            MeshVertex3d {
+                                position: p1_1,
+                                normal: n1_1,
+                            },
                         ],
                     });
                     triangles.push(MeshTriangle3d {
                         vertices: [
-                            MeshVertex3d { position: p0_0, normal: n0_0 },
-                            MeshVertex3d { position: p1_1, normal: n1_1 },
-                            MeshVertex3d { position: p0_1, normal: n0_1 },
+                            MeshVertex3d {
+                                position: p0_0,
+                                normal: n0_0,
+                            },
+                            MeshVertex3d {
+                                position: p1_1,
+                                normal: n1_1,
+                            },
+                            MeshVertex3d {
+                                position: p0_1,
+                                normal: n0_1,
+                            },
                         ],
                     });
                 }
@@ -504,31 +552,67 @@ fn push_smooth_quad(
     if flip {
         triangles.push(MeshTriangle3d {
             vertices: [
-                MeshVertex3d { position: bl, normal: normal_left },
-                MeshVertex3d { position: tr, normal: normal_right },
-                MeshVertex3d { position: br, normal: normal_right },
+                MeshVertex3d {
+                    position: bl,
+                    normal: normal_left,
+                },
+                MeshVertex3d {
+                    position: tr,
+                    normal: normal_right,
+                },
+                MeshVertex3d {
+                    position: br,
+                    normal: normal_right,
+                },
             ],
         });
         triangles.push(MeshTriangle3d {
             vertices: [
-                MeshVertex3d { position: bl, normal: normal_left },
-                MeshVertex3d { position: tl, normal: normal_left },
-                MeshVertex3d { position: tr, normal: normal_right },
+                MeshVertex3d {
+                    position: bl,
+                    normal: normal_left,
+                },
+                MeshVertex3d {
+                    position: tl,
+                    normal: normal_left,
+                },
+                MeshVertex3d {
+                    position: tr,
+                    normal: normal_right,
+                },
             ],
         });
     } else {
         triangles.push(MeshTriangle3d {
             vertices: [
-                MeshVertex3d { position: bl, normal: normal_left },
-                MeshVertex3d { position: br, normal: normal_right },
-                MeshVertex3d { position: tr, normal: normal_right },
+                MeshVertex3d {
+                    position: bl,
+                    normal: normal_left,
+                },
+                MeshVertex3d {
+                    position: br,
+                    normal: normal_right,
+                },
+                MeshVertex3d {
+                    position: tr,
+                    normal: normal_right,
+                },
             ],
         });
         triangles.push(MeshTriangle3d {
             vertices: [
-                MeshVertex3d { position: bl, normal: normal_left },
-                MeshVertex3d { position: tr, normal: normal_right },
-                MeshVertex3d { position: tl, normal: normal_left },
+                MeshVertex3d {
+                    position: bl,
+                    normal: normal_left,
+                },
+                MeshVertex3d {
+                    position: tr,
+                    normal: normal_right,
+                },
+                MeshVertex3d {
+                    position: tl,
+                    normal: normal_left,
+                },
             ],
         });
     }
@@ -616,11 +700,11 @@ fn triangulate_polygon(points: &[DVec2]) -> Vec<[usize; 3]> {
                 let v1 = (p_prev - p_curr).normalize_or_zero();
                 let v2 = (p_next - p_curr).normalize_or_zero();
                 let v3 = (p_next - p_prev).normalize_or_zero();
-                
+
                 let dot1 = v1.dot(v2);
                 let dot2 = (-v1).dot(v3);
                 let dot3 = (-v2).dot(-v3);
-                
+
                 // Minimum angle corresponds to the maximum dot product
                 let max_dot = dot1.max(dot2).max(dot3);
                 // We want to minimize the max_dot (which means maximizing the min angle)
@@ -807,10 +891,7 @@ mod tests {
             12.0,
         );
 
-        assert!(mesh
-            .edges
-            .iter()
-            .all(|e| e.kind == super::EdgeKind::Crease));
+        assert!(mesh.edges.iter().all(|e| e.kind == super::EdgeKind::Crease));
     }
 
     #[test]
@@ -823,9 +904,6 @@ mod tests {
             10.0,
         );
 
-        assert!(mesh
-            .edges
-            .iter()
-            .all(|e| e.kind == super::EdgeKind::Border));
+        assert!(mesh.edges.iter().all(|e| e.kind == super::EdgeKind::Border));
     }
 }

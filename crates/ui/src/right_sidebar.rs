@@ -16,7 +16,7 @@ pub fn render(ui: &mut Ui, shell: &ShellContext<'_>, response: &mut ShellRespons
     let constraints_badge = shell
         .project
         .active_sketch()
-        .map(|sketch| sketch.dimensions.len())
+        .map(|sketch| sketch.constraints.len() + sketch.dimensions.len())
         .filter(|count| *count > 0)
         .map(|count| count.to_string());
 
@@ -46,7 +46,7 @@ pub fn render(ui: &mut Ui, shell: &ShellContext<'_>, response: &mut ShellRespons
                         ph::LIST_CHECKS,
                         constraints_badge.as_deref(),
                         |ui| {
-                            constraints::render_constraints_section(ui, shell);
+                            constraints::render_constraints_section(ui, shell, response);
                         },
                     );
                     section(ui, "Export", ph::EXPORT, None, |ui| {

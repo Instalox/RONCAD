@@ -48,7 +48,12 @@ pub fn render(ui: &mut Ui, shell: &mut ShellContext<'_>, response: &mut ShellRes
                     }
 
                     toolbar_divider(ui);
-                    let _ = icon_button(ui, ph::FLOPPY_DISK, "Save project");
+                    if icon_button(ui, ph::FOLDER_OPEN, "Open project").clicked() {
+                        response.open_project_requested = true;
+                    }
+                    if icon_button(ui, ph::FLOPPY_DISK, "Save project").clicked() {
+                        response.save_project_requested = true;
+                    }
                     let _ = icon_button(ui, ph::ARROWS_COUNTER_CLOCKWISE, "Undo");
                     let _ = icon_button(ui, ph::ARROW_CLOCKWISE, "Redo");
                     if icon_button(ui, ph::PROJECTOR_SCREEN, "Fit view").clicked() {
@@ -64,15 +69,18 @@ pub fn render(ui: &mut Ui, shell: &mut ShellContext<'_>, response: &mut ShellRes
                                 tool_accent,
                                 ThemeColors::tool_accent_dim(active_tool),
                             );
-                            ui.add_sized(
+                            let project_label = ui.add_sized(
                                 Vec2::new(120.0, TOOLBAR_ICON_SIZE),
                                 Label::new(
-                                    RichText::new(&shell.project.name)
+                                    RichText::new(project_title(shell))
                                         .size(12.0)
                                         .color(ThemeColors::TEXT_DIM),
                                 )
                                 .truncate(),
                             );
+                            if let Some(path) = shell.document_path {
+                                project_label.on_hover_text(path.display().to_string());
+                            }
                             let command_bar = command_bar_hint(
                                 ui,
                                 ui.ctx().os(),
@@ -87,6 +95,14 @@ pub fn render(ui: &mut Ui, shell: &mut ShellContext<'_>, response: &mut ShellRes
                 });
             });
         });
+}
+
+fn project_title(shell: &ShellContext<'_>) -> String {
+    if shell.document_dirty {
+        format!("{}*", shell.project.name)
+    } else {
+        shell.project.name.clone()
+    }
 }
 
 fn brand(ui: &mut Ui, color: egui::Color32) {

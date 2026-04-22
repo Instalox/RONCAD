@@ -2,14 +2,18 @@
 //! chokepoint for state mutation; undo/redo will layer on top later.
 
 use roncad_core::command::{AppCommand, ProfileRegion};
-use roncad_core::selection::{Selection, SelectionItem};
 use roncad_core::ids::SketchId;
+use roncad_core::selection::{Selection, SelectionItem};
 use roncad_geometry::{
     apply_line_fillet, infer_constraints, solve_sketch, Project, Sketch, SketchDimension,
-    SketchEntity, SketchProfile,
+    SketchEntity, SketchProfile, SolveReport,
 };
 
-pub fn apply(project: &mut Project, selection: &mut Selection, command: &AppCommand) {
+pub fn apply(
+    project: &mut Project,
+    selection: &mut Selection,
+    command: &AppCommand,
+) -> Option<SolveReport> {
     let resolve_target = sketch_target(command);
     match command {
         AppCommand::CreateSketch { name, plane } => {
@@ -140,7 +144,11 @@ pub fn apply(project: &mut Project, selection: &mut Selection, command: &AppComm
         AppCommand::AddConstraint { sketch, constraint } => {
             if let Some(s) = project.sketches.get_mut(*sketch) {
                 let refs = constraint.referenced_entities();
-                if refs.iter().all(|id| s.entities.contains_key(*id)) {
+                if refs.iter().all(|id| s.entities.contains_key(*id))
+                    && !s
+                        .iter_constraints()
+                        .any(|(_, existing)| existing == constraint)
+                {
                     s.add_constraint(*constraint);
                 }
             }
@@ -334,9 +342,13 @@ pub fn apply(project: &mut Project, selection: &mut Selection, command: &AppComm
             axis_dir,
             angle_rad,
         } => {
-            if let Some((body, _feature)) =
-                project.revolve_profile(*sketch, sketch_profile(profile), *axis_origin, *axis_dir, *angle_rad)
-            {
+            if let Some((body, _feature)) = project.revolve_profile(
+                *sketch,
+                sketch_profile(profile),
+                *axis_origin,
+                *axis_dir,
+                *angle_rad,
+            ) {
                 selection.clear();
                 selection.insert(SelectionItem::Body(body));
             }
@@ -346,9 +358,11 @@ pub fn apply(project: &mut Project, selection: &mut Selection, command: &AppComm
 
     if let Some(sketch_id) = resolve_target {
         if let Some(s) = project.sketches.get_mut(sketch_id) {
-            solve_sketch(s);
+            return Some(solve_sketch(s));
         }
     }
+
+    None
 }
 
 /// Sketch id to re-solve after this command runs, if any. Commands that
@@ -390,6 +404,7 @@ fn sketch_profile(profile: &ProfileRegion) -> SketchProfile {
 #[cfg(test)]
 mod tests {
     use glam::dvec2;
+    use roncad_core::constraint::Constraint;
     use roncad_core::selection::SelectionItem;
     use roncad_geometry::{Project, Sketch, SketchDimension};
 
@@ -776,6 +791,36 @@ mod tests {
             panic!("expected arc");
         };
         assert!((sweep_angle - std::f64::consts::FRAC_PI_4).abs() < 1e-9);
+    }
+
+    #[test]
+    fn add_constraint_skips_duplicates() {
+        let mut project = Project::new_untitled();
+        let mut selection = Selection::default();
+        let sketch = project.active_sketch.expect("default project has sketch");
+        let entity = project
+            .active_sketch_mut()
+            .expect("active sketch")
+            .add(SketchEntity::Line {
+                a: dvec2(0.0, 0.0),
+                b: dvec2(5.0, 2.0),
+            });
+
+        let command = AppCommand::AddConstraint {
+            sketch,
+            constraint: Constraint::Horizontal { entity },
+        };
+        apply(&mut project, &mut selection, &command);
+        apply(&mut project, &mut selection, &command);
+
+        assert_eq!(
+            project
+                .active_sketch()
+                .expect("active sketch")
+                .constraints
+                .len(),
+            1
+        );
     }
 
     fn contains_line(lines: &[(glam::DVec2, glam::DVec2)], a: glam::DVec2, b: glam::DVec2) -> bool {

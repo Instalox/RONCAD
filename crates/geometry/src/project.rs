@@ -50,6 +50,29 @@ impl Project {
         }
     }
 
+    pub fn from_parts(
+        name: impl Into<String>,
+        workplanes: SlotMap<WorkplaneId, Workplane>,
+        sketches: SlotMap<SketchId, Sketch>,
+        bodies: SlotMap<BodyId, Body>,
+        features: SlotMap<FeatureId, Feature>,
+        active_sketch: Option<SketchId>,
+    ) -> Self {
+        let next_body_serial = next_body_serial(&bodies);
+        let next_feature_serial = next_feature_serial(&features);
+
+        Self {
+            name: name.into(),
+            workplanes,
+            sketches,
+            bodies,
+            features,
+            active_sketch,
+            next_body_serial,
+            next_feature_serial,
+        }
+    }
+
     pub fn active_sketch(&self) -> Option<&Sketch> {
         self.active_sketch.and_then(|id| self.sketches.get(id))
     }
@@ -112,7 +135,10 @@ impl Project {
         axis_dir: glam::DVec2,
         angle_rad: f64,
     ) -> Option<(BodyId, FeatureId)> {
-        if !self.sketches.contains_key(sketch) || axis_dir.length_squared() < 1e-6 || angle_rad == 0.0 {
+        if !self.sketches.contains_key(sketch)
+            || axis_dir.length_squared() < 1e-6
+            || angle_rad == 0.0
+        {
             return None;
         }
 
@@ -182,6 +208,39 @@ impl Project {
         self.next_feature_serial += 1;
         name
     }
+}
+
+fn next_body_serial(bodies: &SlotMap<BodyId, Body>) -> usize {
+    let next_from_names = bodies
+        .values()
+        .filter_map(|body| parse_prefixed_serial(&body.name, "Body"))
+        .max()
+        .map(|serial| serial + 1)
+        .unwrap_or(1);
+
+    next_from_names.max(bodies.len() + 1)
+}
+
+fn next_feature_serial(features: &SlotMap<FeatureId, Feature>) -> usize {
+    let next_from_names = features
+        .values()
+        .filter_map(|feature| parse_trailing_serial(feature.name()))
+        .max()
+        .map(|serial| serial + 1)
+        .unwrap_or(1);
+
+    next_from_names.max(features.len() + 1)
+}
+
+fn parse_prefixed_serial(name: &str, prefix: &str) -> Option<usize> {
+    name.strip_prefix(prefix)?
+        .strip_prefix(' ')?
+        .parse::<usize>()
+        .ok()
+}
+
+fn parse_trailing_serial(name: &str) -> Option<usize> {
+    name.rsplit_once(' ')?.1.parse::<usize>().ok()
 }
 
 #[cfg(test)]

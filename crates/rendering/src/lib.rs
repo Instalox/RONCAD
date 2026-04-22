@@ -4,5 +4,7 @@
 pub mod body_mesh;
 pub mod camera;
 
-pub use body_mesh::{extrude_mesh, revolve_mesh, EdgeKind, FeatureMesh3d, MeshEdge3d, MeshTriangle3d, MeshVertex3d};
+pub use body_mesh::{
+    extrude_mesh, revolve_mesh, EdgeKind, FeatureMesh3d, MeshEdge3d, MeshTriangle3d, MeshVertex3d,
+};
 pub use camera::{adaptive_grid_step_mm, Camera2d, Projection};

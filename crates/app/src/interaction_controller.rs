@@ -295,11 +295,7 @@ fn handle_dynamic_input(
     }
 }
 
-fn handle_numpad_navigation(
-    ui: &Ui,
-    shell: &mut ShellContext<'_>,
-    response: &mut ShellResponse,
-) {
+fn handle_numpad_navigation(ui: &Ui, shell: &mut ShellContext<'_>, response: &mut ShellResponse) {
     if ui.ctx().egui_wants_keyboard_input() {
         return;
     }

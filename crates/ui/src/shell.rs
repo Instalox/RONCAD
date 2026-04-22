@@ -1,11 +1,13 @@
 //! Top-level panel layout: toolbar (top), tool shelf (left),
 //! inspector + project tree (right), status bar (bottom), viewport (center).
 
+use std::path::{Path, PathBuf};
+
 use egui::{pos2, Rect, Sense, Ui};
 use roncad_core::command::AppCommand;
 use roncad_core::ids::WorkplaneId;
 use roncad_core::selection::Selection;
-use roncad_geometry::Project;
+use roncad_geometry::{Project, SolveReport};
 use roncad_rendering::Camera2d;
 use roncad_tools::{SnapEngine, SnapResult, ToolManager};
 
@@ -29,6 +31,12 @@ pub struct ShellContext<'a> {
     pub extrude_hud: &'a mut ExtrudeHudState,
     pub new_sketch_plane: &'a mut Option<WorkplaneId>,
     pub revolve_hud: &'a mut RevolveHudState,
+    pub document_dirty: bool,
+    pub document_path: Option<&'a Path>,
+    pub recent_files: &'a [PathBuf],
+    pub status_text: Option<&'a str>,
+    pub status_is_error: bool,
+    pub last_solve_report: Option<&'a SolveReport>,
 }
 
 #[derive(Default)]
@@ -37,6 +45,12 @@ pub struct ShellResponse {
     pub fit_view_requested: bool,
     pub fit_selection_requested: bool,
     pub quit_requested: bool,
+    pub open_project_requested: bool,
+    pub open_project_by_path_requested: bool,
+    pub open_project_path: Option<PathBuf>,
+    pub save_project_requested: bool,
+    pub save_project_as_requested: bool,
+    pub save_project_as_path_requested: bool,
 }
 
 pub fn render_shell(

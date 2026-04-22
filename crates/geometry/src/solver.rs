@@ -292,16 +292,10 @@ fn line_points(x: &[f64], layout: &DofLayout, id: SketchEntityId) -> Option<(DVe
 }
 
 /// Returns (center, radius) for a circle or arc, else None.
-fn curve_center_radius(
-    x: &[f64],
-    layout: &DofLayout,
-    id: SketchEntityId,
-) -> Option<(DVec2, f64)> {
+fn curve_center_radius(x: &[f64], layout: &DofLayout, id: SketchEntityId) -> Option<(DVec2, f64)> {
     let (off, kind) = layout.ranges.get(&id).copied()?;
     match kind {
-        EntityKind::Circle | EntityKind::Arc => {
-            Some((DVec2::new(x[off], x[off + 1]), x[off + 2]))
-        }
+        EntityKind::Circle | EntityKind::Arc => Some((DVec2::new(x[off], x[off + 1]), x[off + 2])),
         _ => None,
     }
 }
@@ -317,8 +311,7 @@ fn residuals(x: &[f64], layout: &DofLayout, constraints: &[Constraint]) -> Vec<f
 fn append_residual(out: &mut Vec<f64>, x: &[f64], layout: &DofLayout, c: &Constraint) {
     match *c {
         Constraint::Coincident { a, b } => {
-            if let (Some(pa), Some(pb)) = (entity_point(x, layout, a), entity_point(x, layout, b))
-            {
+            if let (Some(pa), Some(pb)) = (entity_point(x, layout, a), entity_point(x, layout, b)) {
                 out.push(pa.x - pb.x);
                 out.push(pa.y - pb.y);
             }
@@ -717,6 +710,9 @@ mod tests {
         let d = b - a;
         let q = center - a;
         let cross = d.x * q.y - d.y * q.x;
-        assert!(cross.abs() < 1e-4, "center should lie on line, cross={cross}");
+        assert!(
+            cross.abs() < 1e-4,
+            "center should lie on line, cross={cross}"
+        );
     }
 }
