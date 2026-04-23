@@ -10,7 +10,6 @@ struct Camera {
     view_proj: mat4x4<f32>,
     eye: vec4<f32>,
     viewport_size_px: vec4<f32>,
-    edge_params: vec4<f32>, // x=half_width_px y=feather_px
     light_key_dir: vec4<f32>,
     light_key_color: vec4<f32>,
     light_fill_dir: vec4<f32>,
@@ -100,6 +99,7 @@ struct EdgeVsIn {
     @location(0) start: vec3<f32>,
     @location(1) end: vec3<f32>,
     @location(2) color: vec4<f32>,
+    @location(3) params: vec2<f32>,
 };
 
 struct EdgeVsOut {
@@ -108,6 +108,7 @@ struct EdgeVsOut {
     @location(1) side_px: f32,
     @location(2) along_px: f32,
     @location(3) length_px: f32,
+    @location(4) params: vec2<f32>,
 };
 
 fn pixel_delta_to_ndc(delta_px: vec2<f32>) -> vec2<f32> {
@@ -143,8 +144,8 @@ fn vs_edge(@builtin(vertex_index) vertex_index: u32, in: EdgeVsIn) -> EdgeVsOut 
     }
     let normal_px = vec2<f32>(-tangent_px.y, tangent_px.x);
 
-    let half_width = camera.edge_params.x;
-    let feather = max(camera.edge_params.y, 0.001);
+    let half_width = in.params.x;
+    let feather = max(in.params.y, 0.001);
     let half_extent = half_width + feather;
 
     var use_end = false;
@@ -181,13 +182,14 @@ fn vs_edge(@builtin(vertex_index) vertex_index: u32, in: EdgeVsIn) -> EdgeVsOut 
     out.side_px = side_px;
     out.along_px = along_px;
     out.length_px = segment_len;
+    out.params = in.params;
     return out;
 }
 
 @fragment
 fn fs_edge(in: EdgeVsOut) -> @location(0) vec4<f32> {
-    let half_width = camera.edge_params.x;
-    let feather = max(camera.edge_params.y, 0.001);
+    let half_width = in.params.x;
+    let feather = max(in.params.y, 0.001);
     let side_dist = abs(in.side_px) - half_width;
     let cap_dist = max(-in.along_px, in.along_px - in.length_px);
     let outside = max(side_dist, cap_dist);

@@ -20,6 +20,7 @@ use roncad_geometry::{Feature, Project, SketchProfile, Workplane};
 use roncad_rendering::{extrude_mesh, revolve_mesh, Camera2d, EdgeKind, FeatureMesh3d};
 
 const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
+const BODY_MSAA_SAMPLES: u32 = 4;
 
 #[repr(C)]
 #[derive(Copy, Clone, Pod, Zeroable, Default)]
@@ -27,7 +28,6 @@ pub struct CameraUniform {
     view_proj: [[f32; 4]; 4],
     eye: [f32; 4],
     viewport_size_px: [f32; 4],
-    edge_params: [f32; 4],
     light_key_dir: [f32; 4],
     light_key_color: [f32; 4],
     light_fill_dir: [f32; 4],
@@ -53,6 +53,7 @@ pub struct EdgeInstance {
     start: [f32; 3],
     end: [f32; 3],
     color: [f32; 4],
+    params: [f32; 2],
 }
 
 const FACE_VERTEX_SIZE: u64 = std::mem::size_of::<FaceVertex>() as u64;
@@ -76,7 +77,8 @@ pub struct BodyRenderResources {
 
 struct OffscreenTargets {
     size: (u32, u32),
-    color_view: wgpu::TextureView,
+    color_msaa_view: wgpu::TextureView,
+    color_resolve_view: wgpu::TextureView,
     depth_view: wgpu::TextureView,
     blit_bg: wgpu::BindGroup,
 }
@@ -151,6 +153,7 @@ impl BodyRenderResources {
                         0 => Float32x3,
                         1 => Float32x3,
                         2 => Float32x4,
+                        3 => Float32x2,
                     ],
                 }],
                 compilation_options: Default::default(),
@@ -178,7 +181,10 @@ impl BodyRenderResources {
                 stencil: wgpu::StencilState::default(),
                 bias: wgpu::DepthBiasState::default(),
             }),
-            multisample: wgpu::MultisampleState::default(),
+            multisample: wgpu::MultisampleState {
+                count: BODY_MSAA_SAMPLES,
+                ..Default::default()
+            },
             multiview_mask: None,
             cache: None,
         });
@@ -223,7 +229,10 @@ impl BodyRenderResources {
                 // contour quads win the depth fight with coplanar faces.
                 bias: wgpu::DepthBiasState::default(),
             }),
-            multisample: wgpu::MultisampleState::default(),
+            multisample: wgpu::MultisampleState {
+                count: BODY_MSAA_SAMPLES,
+                ..Default::default()
+            },
             multiview_mask: None,
             cache: None,
         });
@@ -317,8 +326,22 @@ impl BodyRenderResources {
                 return;
             }
         }
-        let color = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("roncad offscreen color"),
+        let color_msaa = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("roncad offscreen color msaa"),
+            size: wgpu::Extent3d {
+                width: size.0,
+                height: size.1,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: BODY_MSAA_SAMPLES,
+            dimension: wgpu::TextureDimension::D2,
+            format: self.target_format,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            view_formats: &[],
+        });
+        let color_resolve = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("roncad offscreen color resolve"),
             size: wgpu::Extent3d {
                 width: size.0,
                 height: size.1,
@@ -339,13 +362,14 @@ impl BodyRenderResources {
                 depth_or_array_layers: 1,
             },
             mip_level_count: 1,
-            sample_count: 1,
+            sample_count: BODY_MSAA_SAMPLES,
             dimension: wgpu::TextureDimension::D2,
             format: DEPTH_FORMAT,
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
             view_formats: &[],
         });
-        let color_view = color.create_view(&wgpu::TextureViewDescriptor::default());
+        let color_msaa_view = color_msaa.create_view(&wgpu::TextureViewDescriptor::default());
+        let color_resolve_view = color_resolve.create_view(&wgpu::TextureViewDescriptor::default());
         let depth_view = depth.create_view(&wgpu::TextureViewDescriptor::default());
         let blit_bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("roncad blit bg"),
@@ -353,7 +377,7 @@ impl BodyRenderResources {
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
-                    resource: wgpu::BindingResource::TextureView(&color_view),
+                    resource: wgpu::BindingResource::TextureView(&color_resolve_view),
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
@@ -363,7 +387,8 @@ impl BodyRenderResources {
         });
         self.offscreen = Some(OffscreenTargets {
             size,
-            color_view,
+            color_msaa_view,
+            color_resolve_view,
             depth_view,
             blit_bg,
         });
@@ -610,14 +635,14 @@ impl CallbackTrait for BodyCallback {
         let mut pass = egui_encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("roncad body 3D pass"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view: &offscreen.color_view,
+                view: &offscreen.color_msaa_view,
                 depth_slice: None,
-                resolve_target: None,
+                resolve_target: Some(&offscreen.color_resolve_view),
                 ops: wgpu::Operations {
                     // Transparent clear: areas without geometry let the egui
                     // backdrop (vignette + grid) show through after compositing.
                     load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
-                    store: wgpu::StoreOp::Store,
+                    store: wgpu::StoreOp::Discard,
                 },
             })],
             depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
@@ -728,9 +753,11 @@ mod lighting {
     pub const EDGE_BORDER: [f32; 4] = [0.06, 0.07, 0.08, 0.65];
     pub const EDGE_CREASE_SELECTED: [f32; 4] = [0.31, 0.66, 0.98, 1.0];
     pub const EDGE_BORDER_SELECTED: [f32; 4] = [0.31, 0.66, 0.98, 0.55];
-
-    pub const EDGE_HALF_WIDTH_PX: f32 = 1.35;
-    pub const EDGE_FEATHER_PX: f32 = 1.0;
+    pub const EDGE_CREASE_HALF_WIDTH_PX: f32 = 1.45;
+    pub const EDGE_BORDER_HALF_WIDTH_PX: f32 = 1.05;
+    pub const EDGE_SELECTED_BOOST_PX: f32 = 0.25;
+    pub const EDGE_CREASE_FEATHER_PX: f32 = 0.95;
+    pub const EDGE_BORDER_FEATHER_PX: f32 = 1.15;
 }
 
 fn normalize3(v: [f32; 3]) -> [f32; 3] {
@@ -765,6 +792,25 @@ fn body_edge_color(kind: EdgeKind, selected: bool) -> [f32; 4] {
     }
 }
 
+fn body_edge_style(kind: EdgeKind, selected: bool) -> [f32; 2] {
+    let (half_width, feather) = match kind {
+        EdgeKind::Crease => (
+            lighting::EDGE_CREASE_HALF_WIDTH_PX,
+            lighting::EDGE_CREASE_FEATHER_PX,
+        ),
+        EdgeKind::Border => (
+            lighting::EDGE_BORDER_HALF_WIDTH_PX,
+            lighting::EDGE_BORDER_FEATHER_PX,
+        ),
+    };
+    let half_width = if selected {
+        half_width + lighting::EDGE_SELECTED_BOOST_PX
+    } else {
+        half_width
+    };
+    [half_width, feather]
+}
+
 fn append_feature_mesh(
     mesh: &FeatureMesh3d,
     workplane: &WorkplaneTransform,
@@ -789,12 +835,14 @@ fn append_feature_mesh(
 
     for edge in &mesh.edges {
         let color = body_edge_color(edge.kind, selected);
+        let params = body_edge_style(edge.kind, selected);
         let start = workplane.local_position(edge.start);
         let end = workplane.local_position(edge.end);
         edge_instances.push(EdgeInstance {
             start: [start.x as f32, start.y as f32, start.z as f32],
             end: [end.x as f32, end.y as f32, end.z as f32],
             color,
+            params,
         });
     }
 }
@@ -823,12 +871,6 @@ pub fn build_callback(
         viewport_size_px: [
             viewport_size_px.x as f32,
             viewport_size_px.y as f32,
-            0.0,
-            0.0,
-        ],
-        edge_params: [
-            lighting::EDGE_HALF_WIDTH_PX,
-            lighting::EDGE_FEATHER_PX,
             0.0,
             0.0,
         ],

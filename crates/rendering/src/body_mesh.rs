@@ -655,7 +655,7 @@ fn connector_indices(profile: &SketchProfile, point_count: usize) -> Vec<usize> 
     }
 }
 
-fn triangulate_polygon(points: &[DVec2]) -> Vec<[usize; 3]> {
+pub fn triangulate_polygon(points: &[DVec2]) -> Vec<[usize; 3]> {
     if points.len() < 3 {
         return Vec::new();
     }

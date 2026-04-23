@@ -1,4 +1,4 @@
-use egui::{Color32, Rect, Stroke};
+use egui::{Color32, Pos2, Rect, Shape, Stroke};
 use roncad_core::selection::{Selection, SelectionItem};
 use roncad_geometry::{
     arc_sample_points, ConstraintDiagnosticKind, HoverTarget, Project, SketchEntity, SolveReport,
@@ -86,10 +86,16 @@ pub(super) fn paint(
         };
         let stroke = Stroke::new(stroke_width, color);
         let vertex = Stroke::new(vertex_width, color);
+        let halo = emphasis_halo(selected, hovered, highlighted, problem, color, stroke_width);
+        let emphasize_handles = selected || hovered || highlighted;
         match entity {
             SketchEntity::Point { p } => {
                 if let Some(s) = project_workplane_point(camera, center, workplane, *p) {
+                    if let Some(halo) = halo {
+                        painter.circle_filled(s, point_radius + 2.8, halo.color);
+                    }
                     painter.circle_stroke(s, point_radius, vertex);
+                    painter.circle_filled(s, point_radius * 0.42, color);
                 }
             }
             SketchEntity::Line { a, b } => {
@@ -97,13 +103,40 @@ pub(super) fn paint(
                     project_workplane_point(camera, center, workplane, *a),
                     project_workplane_point(camera, center, workplane, *b),
                 ) {
+                    if let Some(halo) = halo {
+                        painter.line_segment([sa, sb], halo);
+                    }
                     painter.line_segment([sa, sb], stroke);
+                    if emphasize_handles {
+                        paint_handle(painter, sa, color, hovered);
+                        paint_handle(painter, sb, color, hovered);
+                    }
                 }
             }
             SketchEntity::Rectangle { corner_a, corner_b } => {
+                if let Some(halo) = halo {
+                    tool_overlay::paint_rect(
+                        painter, camera, center, workplane, *corner_a, *corner_b, halo,
+                    );
+                }
                 tool_overlay::paint_rect(
                     painter, camera, center, workplane, *corner_a, *corner_b, stroke,
                 );
+                if emphasize_handles {
+                    let corners = [
+                        *corner_a,
+                        glam::dvec2(corner_b.x, corner_a.y),
+                        *corner_b,
+                        glam::dvec2(corner_a.x, corner_b.y),
+                    ];
+                    for corner in corners {
+                        if let Some(pos) =
+                            project_workplane_point(camera, center, workplane, corner)
+                        {
+                            paint_handle(painter, pos, color, hovered);
+                        }
+                    }
+                }
             }
             SketchEntity::Circle { center: c, radius } => {
                 let points: Vec<_> = arc_sample_points(
@@ -116,7 +149,16 @@ pub(super) fn paint(
                 .into_iter()
                 .filter_map(|point| project_workplane_point(camera, center, workplane, point))
                 .collect();
-                painter.add(egui::Shape::closed_line(points, stroke));
+                if let Some(halo) = halo {
+                    painter.add(Shape::closed_line(points.clone(), halo));
+                }
+                painter.add(Shape::closed_line(points, stroke));
+                if emphasize_handles {
+                    if let Some(center_pos) = project_workplane_point(camera, center, workplane, *c)
+                    {
+                        paint_handle(painter, center_pos, color, hovered);
+                    }
+                }
             }
             SketchEntity::Arc {
                 center: c,
@@ -134,10 +176,67 @@ pub(super) fn paint(
                 .into_iter()
                 .filter_map(|point| project_workplane_point(camera, center, workplane, point))
                 .collect();
-                painter.add(egui::Shape::line(points, stroke));
+                if let Some(halo) = halo {
+                    painter.add(Shape::line(points.clone(), halo));
+                }
+                painter.add(Shape::line(points, stroke));
+                if emphasize_handles {
+                    let start =
+                        *c + glam::DVec2::new(start_angle.cos(), start_angle.sin()) * *radius;
+                    let end = *c
+                        + glam::DVec2::new(
+                            (*start_angle + *sweep_angle).cos(),
+                            (*start_angle + *sweep_angle).sin(),
+                        ) * *radius;
+                    for point in [start, end] {
+                        if let Some(pos) = project_workplane_point(camera, center, workplane, point)
+                        {
+                            paint_handle(painter, pos, color, hovered);
+                        }
+                    }
+                }
             }
         }
     }
+}
+
+fn emphasis_halo(
+    selected: bool,
+    hovered: bool,
+    highlighted: bool,
+    problem: Option<ConstraintDiagnosticKind>,
+    color: Color32,
+    stroke_width: f32,
+) -> Option<Stroke> {
+    let alpha = if selected && hovered {
+        96
+    } else if selected {
+        78
+    } else if hovered {
+        70
+    } else if highlighted {
+        68
+    } else if problem.is_some() {
+        60
+    } else {
+        0
+    };
+    (alpha > 0).then(|| Stroke::new(stroke_width + 3.0, with_alpha(color, alpha)))
+}
+
+fn paint_handle(painter: &egui::Painter, pos: Pos2, color: Color32, hovered: bool) {
+    painter.circle_filled(pos, if hovered { 4.0 } else { 3.5 }, with_alpha(color, 42));
+    painter.circle_filled(pos, if hovered { 2.4 } else { 2.1 }, color);
+    painter.circle_stroke(
+        pos,
+        if hovered { 4.0 } else { 3.5 },
+        Stroke::new(1.0, with_alpha(color, 96)),
+    );
+}
+
+fn with_alpha(color: Color32, alpha: u8) -> Color32 {
+    let [r, g, b, _] = color.to_array();
+    Color32::from_rgba_premultiplied(r, g, b, alpha)
 }
 
 fn problem_entity_kind(
