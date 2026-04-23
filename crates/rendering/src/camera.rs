@@ -1,7 +1,7 @@
 //! Perspective/orthographic orbit camera used by the egui-painted viewport.
 //! The legacy `Camera2d` name remains for now to limit churn across the app.
 
-use glam::{DVec2, DVec3};
+use glam::{DMat4, DVec2, DVec3};
 use roncad_geometry::Workplane;
 
 const MIN_ORBIT_RADIUS_MM: f64 = 8.0;
@@ -372,6 +372,37 @@ impl Camera2d {
     pub fn view_depth(&self, world_mm: DVec3) -> f64 {
         let (_, _, forward) = self.basis();
         (world_mm - self.eye_mm()).dot(forward)
+    }
+
+    /// Right-handed view matrix; world → camera space.
+    pub fn view_matrix(&self) -> DMat4 {
+        let (_, up, _) = self.basis();
+        DMat4::look_at_rh(self.eye_mm(), self.target_mm, up)
+    }
+
+    /// Projection matrix targeting wgpu/Vulkan/D3D NDC (z ∈ [0, 1]).
+    pub fn projection_matrix(&self, viewport_size_px: DVec2) -> DMat4 {
+        let aspect = (viewport_size_px.x / viewport_size_px.y.max(1.0)).max(0.001);
+        let near = (self.orbit_radius_mm * 0.005).max(0.05);
+        let far = (self.orbit_radius_mm * 16.0).max(near + 1.0);
+        match self.projection {
+            Projection::Perspective => {
+                DMat4::perspective_rh(self.vertical_fov_radians, aspect, near, far)
+            }
+            Projection::Orthographic => {
+                let half_h = self.orbit_radius_mm * (self.vertical_fov_radians * 0.5).tan();
+                let half_w = half_h * aspect;
+                DMat4::orthographic_rh(-half_w, half_w, -half_h, half_h, near, far)
+            }
+        }
+    }
+
+    /// Combined view-projection, packed as a column-major f32 matrix ready
+    /// for upload to a wgpu uniform buffer.
+    pub fn view_proj_f32(&self, viewport_size_px: DVec2) -> [[f32; 4]; 4] {
+        (self.projection_matrix(viewport_size_px) * self.view_matrix())
+            .as_mat4()
+            .to_cols_array_2d()
     }
 
     pub fn plane_focus_mm(&self) -> DVec2 {

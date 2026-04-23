@@ -14,8 +14,9 @@ use roncad_project_io::{load_project, save_project};
 use roncad_rendering::Camera2d;
 use roncad_tools::{ActiveToolKind, SnapEngine, SnapResult, ToolManager};
 use roncad_ui::{
-    apply_dark_theme, render_shell, theme::ThemeColors, CommandPaletteState, ConstraintPanelState,
-    ExtrudeHudState, HudEditState, RevolveHudState, ShellContext, ShellResponse,
+    apply_dark_theme, render_shell, theme::ThemeColors, viewport::wgpu_renderer::BodyRenderResources,
+    CommandPaletteState, ConstraintPanelState, ExtrudeHudState, HudEditState, RevolveHudState,
+    ShellContext, ShellResponse,
 };
 
 use crate::dispatcher;
@@ -157,6 +158,23 @@ pub struct RonCadApp {
 impl RonCadApp {
     pub fn new(cc: &CreationContext<'_>) -> Self {
         apply_dark_theme(&cc.egui_ctx);
+
+        // Register the wgpu body renderer with the egui_wgpu callback resource
+        // map so paint callbacks can pull the cached pipelines & buffers.
+        if let Some(render_state) = cc.wgpu_render_state.as_ref() {
+            let resources =
+                BodyRenderResources::new(&render_state.device, render_state.target_format);
+            render_state
+                .renderer
+                .write()
+                .callback_resources
+                .insert(resources);
+        } else {
+            tracing::error!(
+                "wgpu_render_state missing — viewport 3D rendering will be disabled"
+            );
+        }
+
         let mut app = Self {
             document: DocumentState::default(),
             tool: ToolRuntimeState::default(),

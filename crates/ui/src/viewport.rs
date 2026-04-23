@@ -15,8 +15,9 @@ mod profile_overlay;
 mod sketch_overlay;
 mod snap_overlay;
 mod tool_overlay;
+pub mod wgpu_renderer;
 
-use egui::{Color32, Frame, Pos2, Rect, Sense, Ui, UiBuilder};
+use egui::{Color32, Frame, Mesh, Pos2, Rect, Sense, Shape, Ui, UiBuilder};
 use glam::DVec2;
 use roncad_geometry::{HoverTarget, Project, Workplane};
 
@@ -61,6 +62,8 @@ pub fn render_in_rect(
             shell
                 .camera
                 .update_viewport(DVec2::new(rect.width() as f64, rect.height() as f64));
+
+            paint_viewport_backdrop(ui.painter(), rect);
 
             let interaction = handle_interaction(ui, &resp, rect, shell, response);
             grid_overlay::paint(ui.painter(), rect, shell.camera, shell.project);
@@ -127,6 +130,46 @@ pub fn render_in_rect(
             extrude_overlay::paint(ui, rect, shell, response);
             nav_gizmo::paint(ui, rect, shell, response);
         });
+}
+
+/// Subtle radial backdrop: lightly lifted center, slightly deeper corners.
+/// Painted as a 3x3 vertex-coloured mesh on top of the panel's flat fill so
+/// the viewport reads as having depth, like a studio render.
+fn paint_viewport_backdrop(painter: &egui::Painter, rect: Rect) {
+    const CENTER: Color32 = Color32::from_rgb(0x1B, 0x1F, 0x27);
+    const EDGE: Color32 = Color32::from_rgb(0x10, 0x12, 0x17);
+    const CORNER: Color32 = Color32::from_rgb(0x08, 0x0A, 0x0D);
+
+    let mid_x = rect.center().x;
+    let mid_y = rect.center().y;
+    let positions = [
+        Pos2::new(rect.min.x, rect.min.y),
+        Pos2::new(mid_x, rect.min.y),
+        Pos2::new(rect.max.x, rect.min.y),
+        Pos2::new(rect.min.x, mid_y),
+        Pos2::new(mid_x, mid_y),
+        Pos2::new(rect.max.x, mid_y),
+        Pos2::new(rect.min.x, rect.max.y),
+        Pos2::new(mid_x, rect.max.y),
+        Pos2::new(rect.max.x, rect.max.y),
+    ];
+    let colors = [
+        CORNER, EDGE, CORNER, EDGE, CENTER, EDGE, CORNER, EDGE, CORNER,
+    ];
+
+    let mut mesh = Mesh::default();
+    mesh.reserve_vertices(9);
+    mesh.reserve_triangles(8);
+    for index in 0..9 {
+        mesh.colored_vertex(positions[index], colors[index]);
+    }
+    // Two triangles per quad in the 3x3 grid.
+    let quads = [(0u32, 1, 4, 3), (1, 2, 5, 4), (3, 4, 7, 6), (4, 5, 8, 7)];
+    for (a, b, c, d) in quads {
+        mesh.add_triangle(a, b, c);
+        mesh.add_triangle(a, c, d);
+    }
+    painter.add(Shape::mesh(mesh));
 }
 
 fn pick_step(pixels_per_mm: f64, min_px: f64) -> f64 {
