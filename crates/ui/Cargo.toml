@@ -21,3 +21,6 @@ wgpu.workspace = true
 bytemuck.workspace = true
 glam.workspace = true
 slotmap.workspace = true
+
+[dev-dependencies]
+naga.workspace = true

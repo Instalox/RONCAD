@@ -6,13 +6,18 @@
 //! HUDs, the grid) continue to be painter-driven and naturally land on
 //! top of the 3D output because the callback is inserted before them.
 
+use std::collections::{HashMap, HashSet};
+
 use bytemuck::{Pod, Zeroable};
 use egui::Rect;
 use egui_wgpu::{CallbackResources, CallbackTrait, ScreenDescriptor};
-use glam::DVec2;
-use roncad_core::selection::{Selection, SelectionItem};
-use roncad_geometry::Project;
-use roncad_rendering::{extrude_mesh, revolve_mesh, Camera2d, EdgeKind};
+use glam::{DVec2, DVec3};
+use roncad_core::{
+    ids::BodyId,
+    selection::{Selection, SelectionItem},
+};
+use roncad_geometry::{Feature, Project, SketchProfile, Workplane};
+use roncad_rendering::{extrude_mesh, revolve_mesh, Camera2d, EdgeKind, FeatureMesh3d};
 
 const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 
@@ -21,6 +26,8 @@ const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 pub struct CameraUniform {
     view_proj: [[f32; 4]; 4],
     eye: [f32; 4],
+    viewport_size_px: [f32; 4],
+    edge_params: [f32; 4],
     light_key_dir: [f32; 4],
     light_key_color: [f32; 4],
     light_fill_dir: [f32; 4],
@@ -42,13 +49,14 @@ pub struct FaceVertex {
 
 #[repr(C)]
 #[derive(Copy, Clone, Pod, Zeroable)]
-pub struct EdgeVertex {
-    position: [f32; 3],
+pub struct EdgeInstance {
+    start: [f32; 3],
+    end: [f32; 3],
     color: [f32; 4],
 }
 
 const FACE_VERTEX_SIZE: u64 = std::mem::size_of::<FaceVertex>() as u64;
-const EDGE_VERTEX_SIZE: u64 = std::mem::size_of::<EdgeVertex>() as u64;
+const EDGE_INSTANCE_SIZE: u64 = std::mem::size_of::<EdgeInstance>() as u64;
 
 /// Per-device GPU resources for body rendering. Inserted into
 /// `egui_wgpu::Renderer::callback_resources` once at app startup.
@@ -61,10 +69,8 @@ pub struct BodyRenderResources {
     blit_pipeline: wgpu::RenderPipeline,
     blit_bind_group_layout: wgpu::BindGroupLayout,
     blit_sampler: wgpu::Sampler,
-    face_buffer: Option<(wgpu::Buffer, u32)>,
-    edge_buffer: Option<(wgpu::Buffer, u32)>,
-    face_buffer_capacity: u64,
-    edge_buffer_capacity: u64,
+    scene_key: Option<u64>,
+    body_buffers: HashMap<BodyId, CachedBodyBuffers>,
     offscreen: Option<OffscreenTargets>,
 }
 
@@ -73,6 +79,19 @@ struct OffscreenTargets {
     color_view: wgpu::TextureView,
     depth_view: wgpu::TextureView,
     blit_bg: wgpu::BindGroup,
+}
+
+struct CachedBodyBuffers {
+    revision: u64,
+    selected: bool,
+    face_buffer: Option<CachedVertexBuffer>,
+    edge_buffer: Option<CachedVertexBuffer>,
+}
+
+struct CachedVertexBuffer {
+    buffer: wgpu::Buffer,
+    count: u32,
+    capacity: u64,
 }
 
 impl BodyRenderResources {
@@ -98,7 +117,7 @@ impl BodyRenderResources {
                     ty: wgpu::BufferBindingType::Uniform,
                     has_dynamic_offset: false,
                     min_binding_size: wgpu::BufferSize::new(
-                        std::mem::size_of::<CameraUniform>() as u64,
+                        std::mem::size_of::<CameraUniform>() as u64
                     ),
                 },
                 count: None,
@@ -171,11 +190,12 @@ impl BodyRenderResources {
                 module: &shader,
                 entry_point: Some("vs_edge"),
                 buffers: &[wgpu::VertexBufferLayout {
-                    array_stride: EDGE_VERTEX_SIZE,
-                    step_mode: wgpu::VertexStepMode::Vertex,
+                    array_stride: EDGE_INSTANCE_SIZE,
+                    step_mode: wgpu::VertexStepMode::Instance,
                     attributes: &wgpu::vertex_attr_array![
                         0 => Float32x3,
-                        1 => Float32x4,
+                        1 => Float32x3,
+                        2 => Float32x4,
                     ],
                 }],
                 compilation_options: Default::default(),
@@ -191,7 +211,7 @@ impl BodyRenderResources {
                 compilation_options: Default::default(),
             }),
             primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::LineList,
+                topology: wgpu::PrimitiveTopology::TriangleList,
                 ..Default::default()
             },
             depth_stencil: Some(wgpu::DepthStencilState {
@@ -199,9 +219,8 @@ impl BodyRenderResources {
                 depth_write_enabled: Some(false),
                 depth_compare: Some(wgpu::CompareFunction::LessEqual),
                 stencil: wgpu::StencilState::default(),
-                // wgpu disallows polygon-style depth bias on line topology;
-                // the edge vertex shader applies a small clip-space z offset
-                // instead so edges win the depth fight with coplanar faces.
+                // The edge shader applies a small clip-space z offset so
+                // contour quads win the depth fight with coplanar faces.
                 bias: wgpu::DepthBiasState::default(),
             }),
             multisample: wgpu::MultisampleState::default(),
@@ -286,10 +305,8 @@ impl BodyRenderResources {
             blit_pipeline,
             blit_bind_group_layout,
             blit_sampler,
-            face_buffer: None,
-            edge_buffer: None,
-            face_buffer_capacity: 0,
-            edge_buffer_capacity: 0,
+            scene_key: None,
+            body_buffers: HashMap::new(),
             offscreen: None,
         }
     }
@@ -352,55 +369,194 @@ impl BodyRenderResources {
         });
     }
 
-    fn ensure_face_buffer(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, data: &[FaceVertex]) {
-        if data.is_empty() {
-            self.face_buffer = None;
+    fn ensure_body_buffers(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        body: &SceneBody,
+    ) {
+        let cached = self.body_buffers.get(&body.body_id);
+        if cached
+            .is_some_and(|entry| entry.revision == body.revision && entry.selected == body.selected)
+        {
             return;
         }
-        let needed = (data.len() as u64) * FACE_VERTEX_SIZE;
-        if self.face_buffer_capacity < needed {
-            let capacity = needed.next_power_of_two().max(4096);
-            let buffer = device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("roncad face vb"),
-                size: capacity,
-                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-                mapped_at_creation: false,
-            });
-            self.face_buffer_capacity = capacity;
-            self.face_buffer = Some((buffer, data.len() as u32));
-        }
-        let (buf, count) = self.face_buffer.as_mut().unwrap();
-        *count = data.len() as u32;
-        queue.write_buffer(buf, 0, bytemuck::cast_slice(data));
-    }
 
-    fn ensure_edge_buffer(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, data: &[EdgeVertex]) {
-        if data.is_empty() {
-            self.edge_buffer = None;
-            return;
-        }
-        let needed = (data.len() as u64) * EDGE_VERTEX_SIZE;
-        if self.edge_buffer_capacity < needed {
-            let capacity = needed.next_power_of_two().max(4096);
-            let buffer = device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("roncad edge vb"),
-                size: capacity,
-                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-                mapped_at_creation: false,
-            });
-            self.edge_buffer_capacity = capacity;
-            self.edge_buffer = Some((buffer, data.len() as u32));
-        }
-        let (buf, count) = self.edge_buffer.as_mut().unwrap();
-        *count = data.len() as u32;
-        queue.write_buffer(buf, 0, bytemuck::cast_slice(data));
+        let (face_vertices, edge_instances) = body.build_vertices();
+        let entry = self
+            .body_buffers
+            .entry(body.body_id)
+            .or_insert_with(CachedBodyBuffers::default);
+        entry.revision = body.revision;
+        entry.selected = body.selected;
+        write_cached_vertex_buffer(
+            device,
+            queue,
+            &mut entry.face_buffer,
+            &face_vertices,
+            FACE_VERTEX_SIZE,
+            "roncad body face vb",
+        );
+        write_cached_vertex_buffer(
+            device,
+            queue,
+            &mut entry.edge_buffer,
+            &edge_instances,
+            EDGE_INSTANCE_SIZE,
+            "roncad body edge vb",
+        );
     }
 }
 
-/// Per-frame data shipped into the egui paint callback.
+impl Default for CachedBodyBuffers {
+    fn default() -> Self {
+        Self {
+            revision: 0,
+            selected: false,
+            face_buffer: None,
+            edge_buffer: None,
+        }
+    }
+}
+
+fn write_cached_vertex_buffer<T: Pod>(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    slot: &mut Option<CachedVertexBuffer>,
+    data: &[T],
+    stride: u64,
+    label: &'static str,
+) {
+    if data.is_empty() {
+        *slot = None;
+        return;
+    }
+
+    let needed = (data.len() as u64) * stride;
+    let needs_realloc = match slot.as_ref() {
+        Some(buffer) => buffer.capacity < needed,
+        None => true,
+    };
+    if needs_realloc {
+        let capacity = needed.next_power_of_two().max(4096);
+        *slot = Some(CachedVertexBuffer {
+            buffer: device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some(label),
+                size: capacity,
+                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            }),
+            count: 0,
+            capacity,
+        });
+    }
+
+    let buffer = slot.as_mut().expect("buffer allocated above");
+    buffer.count = data.len() as u32;
+    queue.write_buffer(&buffer.buffer, 0, bytemuck::cast_slice(data));
+}
+
+struct SceneBody {
+    body_id: BodyId,
+    revision: u64,
+    selected: bool,
+    features: Vec<SceneFeature>,
+}
+
+enum SceneFeature {
+    Extrude {
+        profile: SketchProfile,
+        distance_mm: f64,
+        workplane: WorkplaneTransform,
+    },
+    Revolve {
+        profile: SketchProfile,
+        axis_origin: DVec2,
+        axis_dir: DVec2,
+        angle_rad: f64,
+        workplane: WorkplaneTransform,
+    },
+}
+
+#[derive(Clone, Copy)]
+struct WorkplaneTransform {
+    origin: DVec3,
+    u: DVec3,
+    v: DVec3,
+    normal: DVec3,
+}
+
+impl From<&Workplane> for WorkplaneTransform {
+    fn from(workplane: &Workplane) -> Self {
+        let u = workplane.u.normalize_or_zero();
+        let v = workplane.v.normalize_or_zero();
+        let normal = u.cross(v).normalize_or_zero();
+        Self {
+            origin: workplane.origin,
+            u,
+            v,
+            normal,
+        }
+    }
+}
+
+impl WorkplaneTransform {
+    fn local_position(&self, position: DVec3) -> DVec3 {
+        self.origin + self.u * position.x + self.v * position.y + self.normal * position.z
+    }
+}
+
+impl SceneBody {
+    fn build_vertices(&self) -> (Vec<FaceVertex>, Vec<EdgeInstance>) {
+        let face_color = body_face_color(self.selected);
+        let mut face_vertices = Vec::<FaceVertex>::new();
+        let mut edge_instances = Vec::<EdgeInstance>::new();
+
+        for feature in &self.features {
+            match feature {
+                SceneFeature::Extrude {
+                    profile,
+                    distance_mm,
+                    workplane,
+                } => {
+                    let mesh = extrude_mesh(profile, *distance_mm);
+                    append_feature_mesh(
+                        &mesh,
+                        workplane,
+                        self.selected,
+                        face_color,
+                        &mut face_vertices,
+                        &mut edge_instances,
+                    );
+                }
+                SceneFeature::Revolve {
+                    profile,
+                    axis_origin,
+                    axis_dir,
+                    angle_rad,
+                    workplane,
+                } => {
+                    let mesh = revolve_mesh(profile, *axis_origin, *axis_dir, *angle_rad);
+                    append_feature_mesh(
+                        &mesh,
+                        workplane,
+                        self.selected,
+                        face_color,
+                        &mut face_vertices,
+                        &mut edge_instances,
+                    );
+                }
+            }
+        }
+
+        (face_vertices, edge_instances)
+    }
+}
+
+/// Per-frame scene description shipped into the egui paint callback.
 pub struct BodyCallback {
-    pub face_vertices: Vec<FaceVertex>,
-    pub edge_vertices: Vec<EdgeVertex>,
+    pub scene_key: u64,
+    bodies: Vec<SceneBody>,
     pub camera_uniform: CameraUniform,
     pub viewport_rect: Rect,
 }
@@ -426,10 +582,29 @@ impl CallbackTrait for BodyCallback {
             return Vec::new();
         }
 
+        if resources.scene_key != Some(self.scene_key) {
+            resources.scene_key = Some(self.scene_key);
+            resources.body_buffers.clear();
+        }
+
+        let active_body_ids = self
+            .bodies
+            .iter()
+            .map(|body| body.body_id)
+            .collect::<HashSet<_>>();
+        resources
+            .body_buffers
+            .retain(|body_id, _| active_body_ids.contains(body_id));
+
         resources.ensure_offscreen(device, (width, height));
-        queue.write_buffer(&resources.camera_buffer, 0, bytemuck::bytes_of(&self.camera_uniform));
-        resources.ensure_face_buffer(device, queue, &self.face_vertices);
-        resources.ensure_edge_buffer(device, queue, &self.edge_vertices);
+        queue.write_buffer(
+            &resources.camera_buffer,
+            0,
+            bytemuck::bytes_of(&self.camera_uniform),
+        );
+        for body in &self.bodies {
+            resources.ensure_body_buffers(device, queue, body);
+        }
 
         let offscreen = resources.offscreen.as_ref().unwrap();
         let mut pass = egui_encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -458,18 +633,30 @@ impl CallbackTrait for BodyCallback {
             multiview_mask: None,
         });
 
-        if let Some((buf, count)) = &resources.face_buffer {
-            pass.set_pipeline(&resources.face_pipeline);
-            pass.set_bind_group(0, &resources.scene_bind_group, &[]);
-            pass.set_vertex_buffer(0, buf.slice(..));
-            pass.draw(0..*count, 0..1);
+        pass.set_bind_group(0, &resources.scene_bind_group, &[]);
+        pass.set_pipeline(&resources.face_pipeline);
+        for body in &self.bodies {
+            let Some(buffers) = resources.body_buffers.get(&body.body_id) else {
+                continue;
+            };
+            let Some(face_buffer) = &buffers.face_buffer else {
+                continue;
+            };
+            pass.set_vertex_buffer(0, face_buffer.buffer.slice(..));
+            pass.draw(0..face_buffer.count, 0..1);
         }
 
-        if let Some((buf, count)) = &resources.edge_buffer {
-            pass.set_pipeline(&resources.edge_pipeline);
-            pass.set_bind_group(0, &resources.scene_bind_group, &[]);
-            pass.set_vertex_buffer(0, buf.slice(..));
-            pass.draw(0..*count, 0..1);
+        pass.set_bind_group(0, &resources.scene_bind_group, &[]);
+        pass.set_pipeline(&resources.edge_pipeline);
+        for body in &self.bodies {
+            let Some(buffers) = resources.body_buffers.get(&body.body_id) else {
+                continue;
+            };
+            let Some(edge_buffer) = &buffers.edge_buffer else {
+                continue;
+            };
+            pass.set_vertex_buffer(0, edge_buffer.buffer.slice(..));
+            pass.draw(0..6, 0..edge_buffer.count);
         }
 
         drop(pass);
@@ -541,6 +728,9 @@ mod lighting {
     pub const EDGE_BORDER: [f32; 4] = [0.06, 0.07, 0.08, 0.65];
     pub const EDGE_CREASE_SELECTED: [f32; 4] = [0.31, 0.66, 0.98, 1.0];
     pub const EDGE_BORDER_SELECTED: [f32; 4] = [0.31, 0.66, 0.98, 0.55];
+
+    pub const EDGE_HALF_WIDTH_PX: f32 = 1.35;
+    pub const EDGE_FEATHER_PX: f32 = 1.0;
 }
 
 fn normalize3(v: [f32; 3]) -> [f32; 3] {
@@ -556,9 +746,62 @@ fn vec3_pad(v: [f32; 3], w: f32) -> [f32; 4] {
     [v[0], v[1], v[2], w]
 }
 
-/// Build a `BodyCallback` from the project. Geometry is generated on the CPU
-/// (via the existing `roncad_rendering` mesh routines) and packed into
-/// vertex buffers ready for the GPU pipeline.
+fn body_face_color(selected: bool) -> [f32; 4] {
+    let albedo = if selected {
+        lighting::BODY_SELECTED
+    } else {
+        lighting::BODY_BASE
+    };
+    let emissive = if selected { 0.10 } else { 0.0 };
+    [albedo[0], albedo[1], albedo[2], emissive]
+}
+
+fn body_edge_color(kind: EdgeKind, selected: bool) -> [f32; 4] {
+    match (kind, selected) {
+        (EdgeKind::Crease, false) => lighting::EDGE_CREASE,
+        (EdgeKind::Crease, true) => lighting::EDGE_CREASE_SELECTED,
+        (EdgeKind::Border, false) => lighting::EDGE_BORDER,
+        (EdgeKind::Border, true) => lighting::EDGE_BORDER_SELECTED,
+    }
+}
+
+fn append_feature_mesh(
+    mesh: &FeatureMesh3d,
+    workplane: &WorkplaneTransform,
+    selected: bool,
+    face_color: [f32; 4],
+    face_vertices: &mut Vec<FaceVertex>,
+    edge_instances: &mut Vec<EdgeInstance>,
+) {
+    let normal_origin = workplane.local_position(DVec3::ZERO);
+    for triangle in &mesh.triangles {
+        for vertex in &triangle.vertices {
+            let position = workplane.local_position(vertex.position);
+            let normal =
+                (workplane.local_position(vertex.normal) - normal_origin).normalize_or_zero();
+            face_vertices.push(FaceVertex {
+                position: [position.x as f32, position.y as f32, position.z as f32],
+                normal: [normal.x as f32, normal.y as f32, normal.z as f32],
+                color: face_color,
+            });
+        }
+    }
+
+    for edge in &mesh.edges {
+        let color = body_edge_color(edge.kind, selected);
+        let start = workplane.local_position(edge.start);
+        let end = workplane.local_position(edge.end);
+        edge_instances.push(EdgeInstance {
+            start: [start.x as f32, start.y as f32, start.z as f32],
+            end: [end.x as f32, end.y as f32, end.z as f32],
+            color,
+        });
+    }
+}
+
+/// Build a `BodyCallback` from the project. Per-body body/feature descriptions
+/// are gathered on the CPU, and only invalidated bodies rebuild/upload GPU
+/// buffers inside the callback resource cache.
 pub fn build_callback(
     project: &Project,
     selection: &Selection,
@@ -577,21 +820,24 @@ pub fn build_callback(
     let camera_uniform = CameraUniform {
         view_proj,
         eye: [eye.x as f32, eye.y as f32, eye.z as f32, 1.0],
+        viewport_size_px: [
+            viewport_size_px.x as f32,
+            viewport_size_px.y as f32,
+            0.0,
+            0.0,
+        ],
+        edge_params: [
+            lighting::EDGE_HALF_WIDTH_PX,
+            lighting::EDGE_FEATHER_PX,
+            0.0,
+            0.0,
+        ],
         light_key_dir: vec3_pad(normalize3(lighting::KEY_DIR), lighting::KEY_INTENSITY),
-        light_key_color: vec3_pad(
-            scale3(lighting::KEY_COLOR, lighting::KEY_INTENSITY),
-            0.0,
-        ),
+        light_key_color: vec3_pad(scale3(lighting::KEY_COLOR, lighting::KEY_INTENSITY), 0.0),
         light_fill_dir: vec3_pad(normalize3(lighting::FILL_DIR), lighting::FILL_INTENSITY),
-        light_fill_color: vec3_pad(
-            scale3(lighting::FILL_COLOR, lighting::FILL_INTENSITY),
-            0.0,
-        ),
+        light_fill_color: vec3_pad(scale3(lighting::FILL_COLOR, lighting::FILL_INTENSITY), 0.0),
         light_back_dir: vec3_pad(normalize3(lighting::BACK_DIR), lighting::BACK_INTENSITY),
-        light_back_color: vec3_pad(
-            scale3(lighting::BACK_COLOR, lighting::BACK_INTENSITY),
-            0.0,
-        ),
+        light_back_color: vec3_pad(scale3(lighting::BACK_COLOR, lighting::BACK_INTENSITY), 0.0),
         ambient_sky: vec3_pad(lighting::AMBIENT_SKY, 0.0),
         ambient_ground: vec3_pad(lighting::AMBIENT_GROUND, 0.0),
         spec_params: [
@@ -602,81 +848,73 @@ pub fn build_callback(
         ],
     };
 
-    let mut face_vertices = Vec::<FaceVertex>::new();
-    let mut edge_vertices = Vec::<EdgeVertex>::new();
-
-    for (body_id, _) in project.bodies.iter() {
+    let mut bodies = Vec::<SceneBody>::new();
+    for (body_id, body) in project.bodies.iter() {
         let selected = selection.contains(&SelectionItem::Body(body_id));
-        let albedo = if selected {
-            lighting::BODY_SELECTED
-        } else {
-            lighting::BODY_BASE
-        };
-        let emissive = if selected { 0.10 } else { 0.0 };
-        let face_color = [albedo[0], albedo[1], albedo[2], emissive];
-
-        for (_, feature) in project.body_features(body_id) {
-            if !feature.is_profile_valid() {
-                continue;
-            }
-            let Some(workplane) = feature
-                .source_sketch()
-                .and_then(|sketch_id| project.sketch_workplane(sketch_id))
-                .or_else(|| project.workplanes.iter().next().map(|(_, plane)| plane))
-            else {
-                continue;
-            };
-
-            let mesh = match feature {
-                roncad_geometry::Feature::Extrude(f) => extrude_mesh(&f.profile, f.distance_mm),
-                roncad_geometry::Feature::Revolve(f) => {
-                    revolve_mesh(&f.profile, f.axis_origin, f.axis_dir, f.angle_rad)
-                }
-            };
-
-            let n_origin = workplane.local_position(glam::DVec3::ZERO);
-            for triangle in &mesh.triangles {
-                for vertex in &triangle.vertices {
-                    let p = workplane.local_position(vertex.position);
-                    let n = (workplane.local_position(vertex.normal) - n_origin)
-                        .normalize_or_zero();
-                    face_vertices.push(FaceVertex {
-                        position: [p.x as f32, p.y as f32, p.z as f32],
-                        normal: [n.x as f32, n.y as f32, n.z as f32],
-                        color: face_color,
-                    });
-                }
-            }
-
-            for edge in &mesh.edges {
-                let color = match (edge.kind, selected) {
-                    (EdgeKind::Crease, false) => lighting::EDGE_CREASE,
-                    (EdgeKind::Crease, true) => lighting::EDGE_CREASE_SELECTED,
-                    (EdgeKind::Border, false) => lighting::EDGE_BORDER,
-                    (EdgeKind::Border, true) => lighting::EDGE_BORDER_SELECTED,
-                };
-                let s = workplane.local_position(edge.start);
-                let e = workplane.local_position(edge.end);
-                edge_vertices.push(EdgeVertex {
-                    position: [s.x as f32, s.y as f32, s.z as f32],
-                    color,
-                });
-                edge_vertices.push(EdgeVertex {
-                    position: [e.x as f32, e.y as f32, e.z as f32],
-                    color,
-                });
-            }
-        }
+        let features = project
+            .body_features(body_id)
+            .filter_map(|(_, feature)| scene_feature_from_project(project, feature))
+            .collect();
+        bodies.push(SceneBody {
+            body_id,
+            revision: body.mesh_revision(),
+            selected,
+            features,
+        });
     }
 
     BodyCallback {
-        face_vertices,
-        edge_vertices,
+        scene_key: project.render_cache_key(),
+        bodies,
         camera_uniform,
         viewport_rect: rect_points,
     }
 }
 
+fn scene_feature_from_project(project: &Project, feature: &Feature) -> Option<SceneFeature> {
+    if !feature.is_profile_valid() {
+        return None;
+    }
+
+    let workplane = feature
+        .source_sketch()
+        .and_then(|sketch_id| project.sketch_workplane(sketch_id))
+        .or_else(|| project.workplanes.iter().next().map(|(_, plane)| plane))
+        .map(WorkplaneTransform::from)?;
+
+    Some(match feature {
+        Feature::Extrude(feature) => SceneFeature::Extrude {
+            profile: feature.profile.clone(),
+            distance_mm: feature.distance_mm,
+            workplane,
+        },
+        Feature::Revolve(feature) => SceneFeature::Revolve {
+            profile: feature.profile.clone(),
+            axis_origin: feature.axis_origin,
+            axis_dir: feature.axis_dir,
+            angle_rad: feature.angle_rad,
+            workplane,
+        },
+    })
+}
+
 fn scale3(v: [f32; 3], s: f32) -> [f32; 3] {
     [v[0] * s, v[1] * s, v[2] * s]
+}
+
+#[cfg(test)]
+mod tests {
+    use naga::{
+        front::wgsl,
+        valid::{Capabilities, ValidationFlags, Validator},
+    };
+
+    #[test]
+    fn body_shader_wgsl_is_valid() {
+        let module =
+            wgsl::parse_str(include_str!("body_shader.wgsl")).expect("body shader parses as WGSL");
+        Validator::new(ValidationFlags::all(), Capabilities::all())
+            .validate(&module)
+            .expect("body shader validates");
+    }
 }

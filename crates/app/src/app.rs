@@ -14,9 +14,9 @@ use roncad_project_io::{load_project, save_project};
 use roncad_rendering::Camera2d;
 use roncad_tools::{ActiveToolKind, SnapEngine, SnapResult, ToolManager};
 use roncad_ui::{
-    apply_dark_theme, render_shell, theme::ThemeColors, viewport::wgpu_renderer::BodyRenderResources,
-    CommandPaletteState, ConstraintPanelState, ExtrudeHudState, HudEditState, RevolveHudState,
-    ShellContext, ShellResponse,
+    apply_dark_theme, render_shell, theme::ThemeColors,
+    viewport::wgpu_renderer::BodyRenderResources, CommandPaletteState, ConstraintPanelState,
+    ExtrudeHudState, HudEditState, RevolveHudState, ShellContext, ShellResponse,
 };
 
 use crate::dispatcher;
@@ -76,6 +76,7 @@ struct UiState {
     recent_files: Vec<PathBuf>,
     file_dialog: Option<FileDialogState>,
     discard_changes_dialog: Option<DiscardChangesDialogState>,
+    allow_dirty_close_once: bool,
     last_viewport_title: Option<String>,
 }
 
@@ -170,9 +171,7 @@ impl RonCadApp {
                 .callback_resources
                 .insert(resources);
         } else {
-            tracing::error!(
-                "wgpu_render_state missing — viewport 3D rendering will be disabled"
-            );
+            tracing::error!("wgpu_render_state missing — viewport 3D rendering will be disabled");
         }
 
         let mut app = Self {
@@ -366,7 +365,12 @@ impl RonCadApp {
                 }
             }
             PendingDocumentAction::OpenPath(path) => self.load_project_path(path),
-            PendingDocumentAction::Quit => ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close),
+            PendingDocumentAction::Quit => {
+                if self.document.dirty {
+                    self.ui.allow_dirty_close_once = true;
+                }
+                ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
+            }
         }
     }
 
@@ -607,7 +611,16 @@ impl RonCadApp {
     }
 
     fn handle_window_close_request(&mut self, ui: &Ui) {
-        if !ui.ctx().input(|input| input.viewport().close_requested()) || !self.document.dirty {
+        if !ui.ctx().input(|input| input.viewport().close_requested()) {
+            return;
+        }
+
+        if self.ui.allow_dirty_close_once {
+            self.ui.allow_dirty_close_once = false;
+            return;
+        }
+
+        if !self.document.dirty {
             return;
         }
 

@@ -1,7 +1,8 @@
 //! The authoritative Project model: workplanes, sketches, and now body/feature
 //! state for persistent operations like extrusion.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use roncad_core::ids::{BodyId, FeatureId, SketchId, WorkplaneId};
 use slotmap::SlotMap;
@@ -13,6 +14,8 @@ use crate::topology::SketchTopology;
 use crate::workplane::Workplane;
 use crate::SketchProfile;
 
+static NEXT_RENDER_CACHE_KEY: AtomicU64 = AtomicU64::new(1);
+
 #[derive(Debug)]
 pub struct Project {
     pub name: String,
@@ -21,6 +24,7 @@ pub struct Project {
     pub bodies: SlotMap<BodyId, Body>,
     pub features: SlotMap<FeatureId, Feature>,
     pub active_sketch: Option<SketchId>,
+    render_cache_key: u64,
     next_body_serial: usize,
     next_feature_serial: usize,
 }
@@ -48,6 +52,7 @@ impl Project {
             bodies: SlotMap::with_key(),
             features: SlotMap::with_key(),
             active_sketch: Some(first),
+            render_cache_key: next_render_cache_key(),
             next_body_serial: 1,
             next_feature_serial: 1,
         }
@@ -71,6 +76,7 @@ impl Project {
             bodies,
             features,
             active_sketch,
+            render_cache_key: next_render_cache_key(),
             next_body_serial,
             next_feature_serial,
         };
@@ -97,6 +103,10 @@ impl Project {
     pub fn active_workplane(&self) -> Option<&Workplane> {
         let sketch_id = self.active_sketch?;
         self.sketch_workplane(sketch_id)
+    }
+
+    pub fn render_cache_key(&self) -> u64 {
+        self.render_cache_key
     }
 
     pub fn feature_world_bounds(&self, feature: &Feature) -> Option<(glam::DVec3, glam::DVec3)> {
@@ -197,8 +207,19 @@ impl Project {
     }
 
     pub fn clear_feature_sketch_source(&mut self, sketch_id: SketchId) {
+        let mut dirty_bodies = HashSet::new();
         for (_, feature) in self.features.iter_mut() {
+            let body_id = feature.body();
+            let was_linked = feature.source_sketch() == Some(sketch_id);
             feature.clear_source_sketch_if_matches(sketch_id);
+            if was_linked {
+                dirty_bodies.insert(body_id);
+            }
+        }
+        for body_id in dirty_bodies {
+            if let Some(body) = self.bodies.get_mut(body_id) {
+                body.bump_mesh_revision();
+            }
         }
     }
 
@@ -207,9 +228,16 @@ impl Project {
             return;
         };
         let topology = SketchTopology::from_sketch(sketch);
+        let mut dirty_bodies = HashSet::new();
         for (_, feature) in self.features.iter_mut() {
             if feature.source_sketch() == Some(sketch_id) {
+                dirty_bodies.insert(feature.body());
                 feature.rebuild_from_topology(&topology);
+            }
+        }
+        for body_id in dirty_bodies {
+            if let Some(body) = self.bodies.get_mut(body_id) {
+                body.bump_mesh_revision();
             }
         }
     }
@@ -272,6 +300,10 @@ impl Project {
             feature.attach_profile_key(key);
         }
     }
+}
+
+fn next_render_cache_key() -> u64 {
+    NEXT_RENDER_CACHE_KEY.fetch_add(1, Ordering::Relaxed)
 }
 
 fn next_body_serial(bodies: &SlotMap<BodyId, Body>) -> usize {
@@ -392,11 +424,14 @@ mod tests {
             *radius = 4.0;
         }
 
+        let body_id = project.features[feature_id].body();
+        let previous_revision = project.bodies[body_id].mesh_revision();
         project.rebuild_features_for_sketch(sketch_id);
 
         let feature = project.features.get(feature_id).expect("feature");
         assert!(feature.is_profile_valid());
         assert_eq!(feature.area_mm2(), std::f64::consts::PI * 16.0);
+        assert!(project.bodies[body_id].mesh_revision() > previous_revision);
     }
 
     #[test]

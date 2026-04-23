@@ -17,13 +17,8 @@ pub(super) fn paint(
     selection: &Selection,
 ) {
     let pixels_per_point = painter.ctx().pixels_per_point();
-    let callback = wgpu_renderer::build_callback(
-        project,
-        selection,
-        camera,
-        rect,
-        pixels_per_point,
-    );
+    let callback =
+        wgpu_renderer::build_callback(project, selection, camera, rect, pixels_per_point);
     let paint_callback = egui_wgpu::Callback::new_paint_callback(rect, callback);
     painter.add(Shape::Callback(paint_callback));
 }
