@@ -259,6 +259,20 @@ impl Project {
         })
     }
 
+    pub fn body_world_bounds(&self, body_id: BodyId) -> Option<(glam::DVec3, glam::DVec3)> {
+        let mut min = glam::DVec3::splat(f64::INFINITY);
+        let mut max = glam::DVec3::splat(f64::NEG_INFINITY);
+        let mut found = false;
+        for (_, feature) in self.body_features(body_id) {
+            if let Some((feature_min, feature_max)) = self.feature_world_bounds(feature) {
+                min = min.min(feature_min);
+                max = max.max(feature_max);
+                found = true;
+            }
+        }
+        found.then_some((min, max))
+    }
+
     pub fn body_volume_mm3(&self, body_id: BodyId) -> f64 {
         self.body_features(body_id)
             .filter(|(_, feature)| feature.is_profile_valid())

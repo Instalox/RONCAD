@@ -6,8 +6,9 @@
 use std::f64::consts::{FRAC_PI_2, PI};
 
 use egui::{Key, PointerButton, Pos2, Rect, Ui};
-use glam::DVec2;
+use glam::{DVec2, DVec3};
 use roncad_core::command::{AppCommand, SelectionEditMode};
+use roncad_core::ids::BodyId;
 use roncad_geometry::{
     entities_in_lasso, entities_in_selection_rect, pick_closed_profile, HoverTarget,
 };
@@ -149,10 +150,20 @@ pub fn handle_viewport_interaction(
     {
         // Route Select clicks through the preselection so Tab-cycled items
         // commit, not just the topmost pick.
-        response.commands.extend(select_target_commands(
-            shell.preselection.current_target(),
-            modifiers,
-        ));
+        if let Some(target) = shell.preselection.current_target() {
+            response
+                .commands
+                .extend(select_target_commands(Some(target), modifiers));
+        } else if let Some(pointer) = resp.interact_pointer_pos() {
+            let body = pick_body(shell.project, shell.camera, pos_to_dvec(pointer), center);
+            response
+                .commands
+                .extend(select_body_commands(body, modifiers));
+        } else {
+            response
+                .commands
+                .extend(select_body_commands(None, modifiers));
+        }
     } else if resp.clicked_by(PointerButton::Primary) {
         if let Some(pointer) = resp.interact_pointer_pos() {
             let Some(raw_world) = active_workplane(shell).and_then(|plane| {
@@ -277,6 +288,72 @@ fn selection_mode_for_modifiers(modifiers: Modifiers) -> SelectionEditMode {
     } else {
         SelectionEditMode::Replace
     }
+}
+
+fn select_body_commands(target: Option<BodyId>, modifiers: Modifiers) -> Vec<AppCommand> {
+    match (target, modifiers.shift, modifiers.alt) {
+        (Some(body), true, true) => vec![AppCommand::SelectBodies {
+            bodies: vec![body],
+            mode: SelectionEditMode::Remove,
+        }],
+        (Some(body), true, false) => vec![AppCommand::SelectBodies {
+            bodies: vec![body],
+            mode: SelectionEditMode::Add,
+        }],
+        (Some(body), _, _) => vec![AppCommand::SelectBodies {
+            bodies: vec![body],
+            mode: SelectionEditMode::Toggle,
+        }],
+        (None, false, false) => vec![AppCommand::ClearSelection],
+        (None, _, _) => Vec::new(),
+    }
+}
+
+fn pick_body(
+    project: &roncad_geometry::Project,
+    camera: &roncad_rendering::Camera2d,
+    screen: DVec2,
+    screen_center: DVec2,
+) -> Option<BodyId> {
+    let (origin, ray) = camera.screen_ray_with_origin(screen, screen_center);
+    project
+        .bodies
+        .iter()
+        .filter_map(|(body, _)| {
+            let (min, max) = project.body_world_bounds(body)?;
+            ray_aabb_t(origin, ray, min, max).map(|t| (body, t))
+        })
+        .min_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+        .map(|(body, _)| body)
+}
+
+fn ray_aabb_t(origin: DVec3, ray: DVec3, min: DVec3, max: DVec3) -> Option<f64> {
+    let mut t_min = 0.0_f64;
+    let mut t_max = f64::INFINITY;
+    for axis in 0..3 {
+        let o = origin[axis];
+        let d = ray[axis];
+        let min = min[axis];
+        let max = max[axis];
+        if d.abs() <= f64::EPSILON {
+            if o < min || o > max {
+                return None;
+            }
+            continue;
+        }
+        let inv = 1.0 / d;
+        let mut near = (min - o) * inv;
+        let mut far = (max - o) * inv;
+        if near > far {
+            std::mem::swap(&mut near, &mut far);
+        }
+        t_min = t_min.max(near);
+        t_max = t_max.min(far);
+        if t_min > t_max {
+            return None;
+        }
+    }
+    (t_max >= 0.0).then_some(t_min.max(0.0))
 }
 
 fn active_snap_result(

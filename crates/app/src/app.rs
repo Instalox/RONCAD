@@ -784,6 +784,9 @@ fn command_mutates_document(command: &AppCommand) -> bool {
         AppCommand::SetActiveSketch(_)
             | AppCommand::SelectSingle { .. }
             | AppCommand::SelectBody(_)
+            | AppCommand::SelectBodies { .. }
+            | AppCommand::SelectEntities { .. }
+            | AppCommand::SelectVertices { .. }
             | AppCommand::ToggleSelection { .. }
             | AppCommand::ClearSelection
             | AppCommand::NoOp

@@ -8,10 +8,10 @@
 
 use egui::{Area, Frame, Id, Margin, Order, Pos2, Rect, RichText, Sense, Stroke, Ui};
 use roncad_core::command::AppCommand;
-use roncad_core::constraint::Constraint;
-use roncad_core::ids::{SketchEntityId, SketchId};
+use roncad_core::constraint::{Constraint, EntityPoint};
+use roncad_core::ids::{BodyId, SketchEntityId, SketchId};
 use roncad_core::selection::{Selection, SelectionItem};
-use roncad_geometry::{Project, SketchEntity};
+use roncad_geometry::{resolve_entity_point, Project, SketchEntity};
 use roncad_tools::ActiveToolKind;
 
 use crate::shell::{ShellContext, ShellResponse};
@@ -96,9 +96,48 @@ fn suggestion_for(selection: &Selection, project: &Project) -> Option<Suggestion
             _ => None,
         })
         .collect();
+    let vertices: Vec<(SketchId, EntityPoint)> = selection
+        .iter()
+        .filter_map(|item| match item {
+            SelectionItem::SketchVertex { sketch, point } => Some((*sketch, *point)),
+            _ => None,
+        })
+        .collect();
+    let bodies: Vec<BodyId> = selection
+        .iter()
+        .filter_map(|item| match item {
+            SelectionItem::Body(body) => Some(*body),
+            _ => None,
+        })
+        .collect();
 
-    if entities.is_empty() {
+    if entities.is_empty() && vertices.is_empty() && bodies.is_empty() {
         return None;
+    }
+
+    if entities.is_empty() && !vertices.is_empty() && bodies.is_empty() {
+        return vertex_suggestion(project, &vertices);
+    }
+
+    if entities.is_empty() && vertices.is_empty() && !bodies.is_empty() {
+        return Some(Suggestion {
+            hint: if bodies.len() == 1 {
+                "1 body".to_string()
+            } else {
+                format!("{} bodies", bodies.len())
+            },
+            actions: vec![ChipButton {
+                label: "Delete",
+                action: ChipAction::EmitCommand(AppCommand::DeleteSelection),
+            }],
+        });
+    }
+
+    if !vertices.is_empty() {
+        return Some(Suggestion {
+            hint: format!("{} selected", selection.len()),
+            actions: vec![fallback_dimension()],
+        });
     }
 
     // Single entity: one-click length for a line, otherwise Dimension tool.
@@ -184,6 +223,66 @@ fn suggestion_for(selection: &Selection, project: &Project) -> Option<Suggestion
     })
 }
 
+fn vertex_suggestion(
+    project: &Project,
+    vertices: &[(SketchId, EntityPoint)],
+) -> Option<Suggestion> {
+    match vertices {
+        [(sketch, point)] => {
+            let target = point_position(project, *sketch, *point)?;
+            Some(Suggestion {
+                hint: "1 vertex".to_string(),
+                actions: vec![
+                    constraint_button(
+                        "Fix",
+                        *sketch,
+                        Constraint::FixPoint {
+                            point: *point,
+                            target,
+                        },
+                    ),
+                    fallback_dimension(),
+                ],
+            })
+        }
+        [(sketch_a, point_a), (sketch_b, point_b)] if sketch_a == sketch_b => {
+            let a = point_position(project, *sketch_a, *point_a)?;
+            let b = point_position(project, *sketch_a, *point_b)?;
+            Some(Suggestion {
+                hint: "2 vertices".to_string(),
+                actions: vec![
+                    ChipButton {
+                        label: "Distance",
+                        action: ChipAction::EmitCommand(AppCommand::AddDistanceDimension {
+                            sketch: *sketch_a,
+                            start: a,
+                            end: b,
+                        }),
+                    },
+                    constraint_button(
+                        "Coincident",
+                        *sketch_a,
+                        Constraint::Coincident {
+                            a: *point_a,
+                            b: *point_b,
+                        },
+                    ),
+                ],
+            })
+        }
+        _ => Some(Suggestion {
+            hint: format!("{} vertices", vertices.len()),
+            actions: vec![fallback_dimension()],
+        }),
+    }
+}
+
+fn point_position(project: &Project, sketch: SketchId, point: EntityPoint) -> Option<glam::DVec2> {
+    let sketch = project.sketches.get(sketch)?;
+    let entity = sketch.entities.get(point.entity())?;
+    resolve_entity_point(point, entity)
+}
+
 fn fallback_dimension() -> ChipButton {
     ChipButton {
         label: "Dimension",
@@ -245,6 +344,18 @@ mod tests {
         selection
     }
 
+    fn select_vertices(project: &Project, points: &[EntityPoint]) -> Selection {
+        let sketch = project.active_sketch.unwrap();
+        let mut selection = Selection::default();
+        for point in points {
+            selection.insert(SelectionItem::SketchVertex {
+                sketch,
+                point: *point,
+            });
+        }
+        selection
+    }
+
     #[test]
     fn empty_selection_has_no_suggestion() {
         let project = Project::new_untitled();
@@ -276,6 +387,60 @@ mod tests {
             }
             _ => panic!("expected AddDistanceDimension command"),
         }
+    }
+
+    #[test]
+    fn single_vertex_offers_fix_and_dimension() {
+        let mut project = Project::new_untitled();
+        let line = add_line(&mut project, dvec2(1.0, 2.0), dvec2(7.0, 2.0));
+        let s = suggestion_for(
+            &select_vertices(&project, &[EntityPoint::Start(line)]),
+            &project,
+        )
+        .expect("suggestion");
+
+        assert_eq!(s.hint, "1 vertex");
+        let labels: Vec<_> = s.actions.iter().map(|a| a.label).collect();
+        assert_eq!(labels, vec!["Fix", "Dimension"]);
+        assert!(matches!(
+            &s.actions[0].action,
+            ChipAction::EmitCommand(AppCommand::AddConstraint {
+                constraint: Constraint::FixPoint {
+                    point: EntityPoint::Start(_),
+                    ..
+                },
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn two_vertices_offer_distance_and_coincident() {
+        let mut project = Project::new_untitled();
+        let line = add_line(&mut project, dvec2(1.0, 2.0), dvec2(7.0, 2.0));
+        let s = suggestion_for(
+            &select_vertices(
+                &project,
+                &[EntityPoint::Start(line), EntityPoint::End(line)],
+            ),
+            &project,
+        )
+        .expect("suggestion");
+
+        assert_eq!(s.hint, "2 vertices");
+        let labels: Vec<_> = s.actions.iter().map(|a| a.label).collect();
+        assert_eq!(labels, vec!["Distance", "Coincident"]);
+        assert!(matches!(
+            &s.actions[0].action,
+            ChipAction::EmitCommand(AppCommand::AddDistanceDimension { .. })
+        ));
+        assert!(matches!(
+            &s.actions[1].action,
+            ChipAction::EmitCommand(AppCommand::AddConstraint {
+                constraint: Constraint::Coincident { .. },
+                ..
+            })
+        ));
     }
 
     #[test]

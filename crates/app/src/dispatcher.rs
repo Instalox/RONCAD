@@ -401,6 +401,34 @@ pub fn apply(
                 selection.clear();
             }
         }
+        AppCommand::SelectBodies { bodies, mode } => {
+            let valid_bodies: Vec<_> = bodies
+                .iter()
+                .copied()
+                .filter(|body| project.bodies.contains_key(*body))
+                .collect();
+
+            if *mode == SelectionEditMode::Replace {
+                selection.clear();
+            }
+
+            for body in valid_bodies {
+                let item = SelectionItem::Body(body);
+                match mode {
+                    SelectionEditMode::Replace | SelectionEditMode::Add => {
+                        selection.insert(item);
+                    }
+                    SelectionEditMode::Remove => {
+                        selection.remove(&item);
+                    }
+                    SelectionEditMode::Toggle => {
+                        if !selection.remove(&item) {
+                            selection.insert(item);
+                        }
+                    }
+                }
+            }
+        }
         AppCommand::ToggleSelection { sketch, entity } => {
             let item = SelectionItem::SketchEntity {
                 sketch: *sketch,

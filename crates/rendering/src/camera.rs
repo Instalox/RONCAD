@@ -419,7 +419,7 @@ impl Camera2d {
         self.viewport_size_px
     }
 
-    fn screen_ray_with_origin(&self, screen: DVec2, screen_center: DVec2) -> (DVec3, DVec3) {
+    pub fn screen_ray_with_origin(&self, screen: DVec2, screen_center: DVec2) -> (DVec3, DVec3) {
         let (right, up, forward) = self.basis();
         match self.projection {
             Projection::Perspective => {

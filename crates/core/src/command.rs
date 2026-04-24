@@ -132,6 +132,10 @@ pub enum AppCommand {
         mode: SelectionEditMode,
     },
     SelectBody(BodyId),
+    SelectBodies {
+        bodies: Vec<BodyId>,
+        mode: SelectionEditMode,
+    },
     ToggleSelection {
         sketch: SketchId,
         entity: SketchEntityId,
