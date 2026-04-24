@@ -9,7 +9,7 @@ use roncad_core::ids::{ConstraintId, SketchEntityId, SketchId, WorkplaneId};
 use roncad_core::selection::Selection;
 use roncad_geometry::{Project, SolveReport};
 use roncad_rendering::Camera2d;
-use roncad_tools::{SnapEngine, SnapResult, ToolManager};
+use roncad_tools::{PreselectionState, SnapEngine, SnapResult, ToolManager};
 
 use crate::{
     command_palette,
@@ -28,6 +28,7 @@ pub struct ShellContext<'a> {
     pub camera: &'a mut Camera2d,
     pub project: &'a Project,
     pub cursor_world_mm: &'a mut Option<glam::DVec2>,
+    pub preselection: &'a mut PreselectionState,
     pub hud_state: &'a mut HudEditState,
     pub command_palette: &'a mut CommandPaletteState,
     pub extrude_hud: &'a mut ExtrudeHudState,

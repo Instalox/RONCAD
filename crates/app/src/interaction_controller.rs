@@ -8,9 +8,10 @@ use std::f64::consts::{FRAC_PI_2, PI};
 use egui::{Key, PointerButton, Pos2, Rect, Ui};
 use glam::DVec2;
 use roncad_core::command::AppCommand;
-use roncad_geometry::{pick_closed_profile, pick_entity, HoverTarget};
+use roncad_geometry::{pick_closed_profile, HoverTarget};
 use roncad_tools::{
-    ActiveToolKind, Modifiers, SnapEngine, SnapResult, ToolContext, ENTITY_PICK_RADIUS_PX,
+    select_commands, ActiveToolKind, Modifiers, PreselectionState, SnapEngine, SnapResult,
+    ToolContext, ENTITY_PICK_RADIUS_PX,
 };
 use roncad_ui::{ShellContext, ShellResponse, ViewportInteractionState};
 
@@ -54,7 +55,16 @@ pub fn handle_viewport_interaction(
         pixels_per_mm: shell.camera.pixels_per_mm,
         modifiers,
     };
-    let hovered_target = hovered_target(raw_cursor_world, active_kind, &ctx);
+    update_preselection(shell.preselection, raw_cursor_world, active_kind, &ctx);
+    if active_kind == ActiveToolKind::Select && !palette_open && !ui.ctx().text_edit_focused() {
+        let tab_pressed = ui
+            .ctx()
+            .input_mut(|input| input.consume_key(egui::Modifiers::NONE, Key::Tab));
+        if tab_pressed {
+            shell.preselection.cycle();
+        }
+    }
+    let hovered_target = hovered_target(shell.preselection, raw_cursor_world, active_kind, &ctx);
     let snap_result = raw_cursor_world
         .and_then(|world| active_snap_result(world, active_kind, shell.snap_engine, &ctx));
     *shell.snap_result = snap_result;
@@ -73,6 +83,13 @@ pub fn handle_viewport_interaction(
         if let Some(HoverTarget::Profile { sketch, profile }) = hovered_target.as_ref() {
             shell.extrude_hud.arm(*sketch, profile.clone());
         }
+    } else if active_kind == ActiveToolKind::Select && resp.clicked_by(PointerButton::Primary) {
+        // Route Select clicks through the preselection so Tab-cycled items
+        // commit, not just the topmost pick.
+        let additive = modifiers.ctrl || modifiers.shift;
+        response
+            .commands
+            .extend(select_commands(additive, shell.preselection.current()));
     } else if resp.clicked_by(PointerButton::Primary) {
         if let Some(pointer) = resp.interact_pointer_pos() {
             let Some(raw_world) = active_workplane(shell).and_then(|plane| {
@@ -201,20 +218,28 @@ fn active_snap_result(
     }
 }
 
+fn update_preselection(
+    preselection: &mut PreselectionState,
+    raw_world: Option<DVec2>,
+    active_kind: ActiveToolKind,
+    ctx: &ToolContext<'_>,
+) {
+    if active_kind != ActiveToolKind::Select {
+        preselection.clear();
+        return;
+    }
+    let tolerance_mm = ENTITY_PICK_RADIUS_PX / ctx.pixels_per_mm.max(f64::EPSILON);
+    preselection.update(ctx.active_sketch, ctx.sketch, raw_world, tolerance_mm);
+}
+
 fn hovered_target(
+    preselection: &PreselectionState,
     raw_world: Option<DVec2>,
     active_kind: ActiveToolKind,
     ctx: &ToolContext<'_>,
 ) -> Option<HoverTarget> {
     match active_kind {
-        ActiveToolKind::Select => {
-            let sketch_id = ctx.active_sketch?;
-            let sketch = ctx.sketch?;
-            let world = raw_world?;
-            let tolerance_mm = ENTITY_PICK_RADIUS_PX / ctx.pixels_per_mm.max(f64::EPSILON);
-            pick_entity(sketch, world, tolerance_mm)
-                .map(|entity| HoverTarget::sketch_entity(sketch_id, entity))
-        }
+        ActiveToolKind::Select => preselection.hover_target(),
         ActiveToolKind::Extrude => {
             let sketch_id = ctx.active_sketch?;
             let sketch = ctx.sketch?;

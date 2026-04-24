@@ -31,7 +31,7 @@ pub use fillet::{
     LineFilletApplyResult, LineFilletCandidate, LineFilletPreview,
 };
 pub use hover_target::HoverTarget;
-pub use pick::{distance_to_entity, pick_entity};
+pub use pick::{distance_to_entity, pick_entities_stack, pick_entity};
 pub use profile::{closed_profiles, pick_closed_profile, SketchProfile};
 pub use project::Project;
 pub use sketch::Sketch;

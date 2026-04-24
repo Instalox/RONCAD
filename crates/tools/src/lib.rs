@@ -8,6 +8,7 @@ pub mod dynamic_input;
 pub mod fillet_tool;
 pub mod line_tool;
 pub mod manager;
+pub mod preselection;
 pub mod rectangle_tool;
 pub mod select_tool;
 pub mod snapping;
@@ -15,6 +16,8 @@ pub mod tool;
 
 pub use dynamic_input::{DynamicFieldView, DynamicFieldVisualState, DynamicInputState};
 pub use manager::ToolManager;
+pub use preselection::PreselectionState;
+pub use select_tool::select_commands;
 pub use snapping::{SnapAxis, SnapEngine, SnapKind, SnapReference, SnapResult};
 pub use tool::{
     ActiveToolKind, DynamicField, Modifiers, Tool, ToolContext, ToolPreview, ENTITY_PICK_RADIUS_PX,

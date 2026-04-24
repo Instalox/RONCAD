@@ -12,7 +12,7 @@ use roncad_core::selection::Selection;
 use roncad_geometry::{Project, SolveReport};
 use roncad_project_io::{load_project, save_project};
 use roncad_rendering::Camera2d;
-use roncad_tools::{ActiveToolKind, SnapEngine, SnapResult, ToolManager};
+use roncad_tools::{ActiveToolKind, PreselectionState, SnapEngine, SnapResult, ToolManager};
 use roncad_ui::{
     apply_dark_theme, render_shell, theme::ThemeColors,
     viewport::wgpu_renderer::BodyRenderResources, CommandPaletteState, ConstraintPanelState,
@@ -58,6 +58,7 @@ struct ToolRuntimeState {
     snap_engine: SnapEngine,
     snap_result: Option<SnapResult>,
     cursor_world_mm: Option<glam::DVec2>,
+    preselection: PreselectionState,
 }
 
 #[derive(Default)]
@@ -662,6 +663,7 @@ impl RonCadApp {
         self.tool.manager.set_active(ActiveToolKind::Select);
         self.tool.snap_result = None;
         self.tool.cursor_world_mm = None;
+        self.tool.preselection.clear();
         self.ui.hud_state.clear();
         self.ui.command_palette.close();
         self.ui.extrude_hud.clear();
@@ -737,6 +739,7 @@ impl App for RonCadApp {
             camera: &mut self.render.camera,
             project: &self.document.project,
             cursor_world_mm: &mut self.tool.cursor_world_mm,
+            preselection: &mut self.tool.preselection,
             hud_state: &mut self.ui.hud_state,
             command_palette: &mut self.ui.command_palette,
             extrude_hud: &mut self.ui.extrude_hud,
