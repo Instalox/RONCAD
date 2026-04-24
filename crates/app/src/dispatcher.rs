@@ -1,9 +1,10 @@
 //! Applies AppCommand instances to the domain Project. This is the single
 //! chokepoint for state mutation; undo/redo will layer on top later.
 
+use glam::DVec2;
 use roncad_core::command::{AppCommand, ProfileRegion, SelectionEditMode};
-use roncad_core::constraint::EntityPoint;
-use roncad_core::ids::SketchId;
+use roncad_core::constraint::{Constraint, EntityPoint};
+use roncad_core::ids::{SketchEntityId, SketchId};
 use roncad_core::selection::{Selection, SelectionItem};
 use roncad_geometry::{
     apply_line_fillet, infer_constraints, resolve_entity_point, solve_sketch, Project, Sketch,
@@ -55,10 +56,7 @@ pub fn apply(
             corner_b,
         } => {
             if let Some(s) = project.sketches.get_mut(*sketch) {
-                s.add(SketchEntity::Rectangle {
-                    corner_a: *corner_a,
-                    corner_b: *corner_b,
-                });
+                add_canonical_rectangle(s, *corner_a, *corner_b);
             }
         }
         AppCommand::AddCircle {
@@ -551,6 +549,72 @@ fn sketch_target(command: &AppCommand) -> Option<SketchId> {
     }
 }
 
+fn add_canonical_rectangle(
+    sketch: &mut Sketch,
+    corner_a: DVec2,
+    corner_c: DVec2,
+) -> [SketchEntityId; 4] {
+    let corner_b = DVec2::new(corner_c.x, corner_a.y);
+    let corner_d = DVec2::new(corner_a.x, corner_c.y);
+
+    let bottom = sketch.add(SketchEntity::Line {
+        a: corner_a,
+        b: corner_b,
+    });
+    let right = sketch.add(SketchEntity::Line {
+        a: corner_b,
+        b: corner_c,
+    });
+    let top = sketch.add(SketchEntity::Line {
+        a: corner_c,
+        b: corner_d,
+    });
+    let left = sketch.add(SketchEntity::Line {
+        a: corner_d,
+        b: corner_a,
+    });
+
+    for constraint in [
+        Constraint::Horizontal { entity: bottom },
+        Constraint::Vertical { entity: right },
+        Constraint::Horizontal { entity: top },
+        Constraint::Vertical { entity: left },
+        Constraint::Coincident {
+            a: EntityPoint::End(bottom),
+            b: EntityPoint::Start(right),
+        },
+        Constraint::Coincident {
+            a: EntityPoint::End(right),
+            b: EntityPoint::Start(top),
+        },
+        Constraint::Coincident {
+            a: EntityPoint::End(top),
+            b: EntityPoint::Start(left),
+        },
+        Constraint::Coincident {
+            a: EntityPoint::End(left),
+            b: EntityPoint::Start(bottom),
+        },
+    ] {
+        add_constraint_once(sketch, constraint);
+    }
+
+    for line in [bottom, right, top, left] {
+        infer_constraints(sketch, line);
+    }
+
+    [bottom, right, top, left]
+}
+
+fn add_constraint_once(sketch: &mut Sketch, constraint: Constraint) {
+    if !sketch
+        .iter_constraints()
+        .any(|(_, existing)| *existing == constraint)
+    {
+        sketch.add_constraint(constraint);
+    }
+}
+
 fn sketch_profile(profile: &ProfileRegion) -> SketchProfile {
     match profile {
         ProfileRegion::Polygon { points } => SketchProfile::Polygon {
@@ -915,6 +979,54 @@ mod tests {
         };
         assert_eq!(corner_a, dvec2(2.0, 3.0));
         assert_eq!(corner_b, dvec2(22.0, 9.0));
+    }
+
+    #[test]
+    fn add_rectangle_normalizes_to_lines_and_constraints() {
+        let mut project = Project::new_untitled();
+        let mut selection = Selection::default();
+        let sketch = project.active_sketch.expect("default project has sketch");
+
+        apply(
+            &mut project,
+            &mut selection,
+            &AppCommand::AddRectangle {
+                sketch,
+                corner_a: dvec2(1.0, 2.0),
+                corner_b: dvec2(5.0, 6.0),
+            },
+        );
+
+        let sketch_ref = project.active_sketch().expect("active sketch");
+        let lines: Vec<_> = sketch_ref
+            .iter()
+            .filter_map(|(_, entity)| match entity {
+                SketchEntity::Line { a, b } => Some((*a, *b)),
+                SketchEntity::Rectangle { .. } => panic!("new rectangles should be canonical"),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(lines.len(), 4);
+        assert!(lines.contains(&(dvec2(1.0, 2.0), dvec2(5.0, 2.0))));
+        assert!(lines.contains(&(dvec2(5.0, 2.0), dvec2(5.0, 6.0))));
+        assert!(lines.contains(&(dvec2(5.0, 6.0), dvec2(1.0, 6.0))));
+        assert!(lines.contains(&(dvec2(1.0, 6.0), dvec2(1.0, 2.0))));
+
+        let horizontal = sketch_ref
+            .iter_constraints()
+            .filter(|(_, c)| matches!(c, Constraint::Horizontal { .. }))
+            .count();
+        let vertical = sketch_ref
+            .iter_constraints()
+            .filter(|(_, c)| matches!(c, Constraint::Vertical { .. }))
+            .count();
+        let coincident = sketch_ref
+            .iter_constraints()
+            .filter(|(_, c)| matches!(c, Constraint::Coincident { .. }))
+            .count();
+        assert_eq!(horizontal, 2);
+        assert_eq!(vertical, 2);
+        assert_eq!(coincident, 4);
     }
 
     #[test]

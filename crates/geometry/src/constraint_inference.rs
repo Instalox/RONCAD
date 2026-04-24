@@ -86,7 +86,21 @@ pub fn infer_constraints(sketch: &mut Sketch, new_id: SketchEntityId) {
     }
 
     for c in to_add {
-        sketch.add_constraint(c);
+        if !sketch
+            .iter_constraints()
+            .any(|(_, existing)| equivalent_constraint(existing, &c))
+        {
+            sketch.add_constraint(c);
+        }
+    }
+}
+
+fn equivalent_constraint(a: &Constraint, b: &Constraint) -> bool {
+    match (a, b) {
+        (Constraint::Coincident { a: aa, b: ab }, Constraint::Coincident { a: ba, b: bb }) => {
+            (aa == ba && ab == bb) || (aa == bb && ab == ba)
+        }
+        _ => a == b,
     }
 }
 
