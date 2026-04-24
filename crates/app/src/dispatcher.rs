@@ -277,6 +277,22 @@ pub fn apply(
                 sketch: *sketch,
                 point: EntityPoint::Center(*entity),
             });
+            selection.remove(&SelectionItem::SketchVertex {
+                sketch: *sketch,
+                point: EntityPoint::CornerA(*entity),
+            });
+            selection.remove(&SelectionItem::SketchVertex {
+                sketch: *sketch,
+                point: EntityPoint::CornerB(*entity),
+            });
+            selection.remove(&SelectionItem::SketchVertex {
+                sketch: *sketch,
+                point: EntityPoint::CornerC(*entity),
+            });
+            selection.remove(&SelectionItem::SketchVertex {
+                sketch: *sketch,
+                point: EntityPoint::CornerD(*entity),
+            });
         }
         AppCommand::SelectSingle { sketch, entity } => {
             let exists = project

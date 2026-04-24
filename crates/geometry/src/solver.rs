@@ -345,6 +345,14 @@ fn entity_point(x: &[f64], layout: &DofLayout, handle: EntityPoint) -> Option<DV
         (EntityPoint::Center(_), EntityKind::Circle | EntityKind::Arc) => {
             Some(DVec2::new(x[off], x[off + 1]))
         }
+        (EntityPoint::CornerA(_), EntityKind::Rectangle) => Some(DVec2::new(x[off], x[off + 1])),
+        (EntityPoint::CornerB(_), EntityKind::Rectangle) => {
+            Some(DVec2::new(x[off + 2], x[off + 1]))
+        }
+        (EntityPoint::CornerC(_), EntityKind::Rectangle) => {
+            Some(DVec2::new(x[off + 2], x[off + 3]))
+        }
+        (EntityPoint::CornerD(_), EntityKind::Rectangle) => Some(DVec2::new(x[off], x[off + 3])),
         _ => None,
     }
 }

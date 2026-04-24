@@ -519,6 +519,10 @@ pub enum EntityPointFile {
     Start(FileId),
     End(FileId),
     Center(FileId),
+    CornerA(FileId),
+    CornerB(FileId),
+    CornerC(FileId),
+    CornerD(FileId),
 }
 
 impl EntityPointFile {
@@ -533,6 +537,18 @@ impl EntityPointFile {
             EntityPoint::Center(id) => {
                 Self::Center(lookup_file_id(entity_ids, id, "sketch entity")?)
             }
+            EntityPoint::CornerA(id) => {
+                Self::CornerA(lookup_file_id(entity_ids, id, "sketch entity")?)
+            }
+            EntityPoint::CornerB(id) => {
+                Self::CornerB(lookup_file_id(entity_ids, id, "sketch entity")?)
+            }
+            EntityPoint::CornerC(id) => {
+                Self::CornerC(lookup_file_id(entity_ids, id, "sketch entity")?)
+            }
+            EntityPoint::CornerD(id) => {
+                Self::CornerD(lookup_file_id(entity_ids, id, "sketch entity")?)
+            }
         })
     }
 
@@ -546,6 +562,18 @@ impl EntityPointFile {
             Self::End(id) => EntityPoint::End(lookup_slot_id(entity_ids, id, "sketch entity")?),
             Self::Center(id) => {
                 EntityPoint::Center(lookup_slot_id(entity_ids, id, "sketch entity")?)
+            }
+            Self::CornerA(id) => {
+                EntityPoint::CornerA(lookup_slot_id(entity_ids, id, "sketch entity")?)
+            }
+            Self::CornerB(id) => {
+                EntityPoint::CornerB(lookup_slot_id(entity_ids, id, "sketch entity")?)
+            }
+            Self::CornerC(id) => {
+                EntityPoint::CornerC(lookup_slot_id(entity_ids, id, "sketch entity")?)
+            }
+            Self::CornerD(id) => {
+                EntityPoint::CornerD(lookup_slot_id(entity_ids, id, "sketch entity")?)
             }
         })
     }

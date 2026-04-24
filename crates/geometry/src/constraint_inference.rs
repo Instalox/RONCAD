@@ -122,7 +122,12 @@ fn handles_for(id: SketchEntityId, entity: &SketchEntity) -> Vec<EntityPoint> {
             EntityPoint::Center(id),
         ],
         SketchEntity::Circle { .. } => vec![EntityPoint::Center(id)],
-        SketchEntity::Rectangle { .. } => Vec::new(),
+        SketchEntity::Rectangle { .. } => vec![
+            EntityPoint::CornerA(id),
+            EntityPoint::CornerB(id),
+            EntityPoint::CornerC(id),
+            EntityPoint::CornerD(id),
+        ],
     }
 }
 

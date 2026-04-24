@@ -37,6 +37,14 @@ pub fn resolve_entity_point(handle: EntityPoint, entity: &SketchEntity) -> Optio
         ) => Some(arc_end_point(*center, *radius, *start_angle, *sweep_angle)),
         (EntityPoint::Center(_), SketchEntity::Circle { center, .. }) => Some(*center),
         (EntityPoint::Center(_), SketchEntity::Arc { center, .. }) => Some(*center),
+        (EntityPoint::CornerA(_), SketchEntity::Rectangle { corner_a, .. }) => Some(*corner_a),
+        (EntityPoint::CornerB(_), SketchEntity::Rectangle { corner_a, corner_b }) => {
+            Some(DVec2::new(corner_b.x, corner_a.y))
+        }
+        (EntityPoint::CornerC(_), SketchEntity::Rectangle { corner_b, .. }) => Some(*corner_b),
+        (EntityPoint::CornerD(_), SketchEntity::Rectangle { corner_a, corner_b }) => {
+            Some(DVec2::new(corner_a.x, corner_b.y))
+        }
         _ => None,
     }
 }

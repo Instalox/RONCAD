@@ -151,18 +151,32 @@ pub(super) fn paint(
                 tool_overlay::paint_rect(
                     painter, camera, center, workplane, *corner_a, *corner_b, stroke,
                 );
-                if emphasize_handles {
-                    let corners = [
-                        *corner_a,
+                let corners = [
+                    (EntityPoint::CornerA(entity_id), *corner_a),
+                    (
+                        EntityPoint::CornerB(entity_id),
                         glam::dvec2(corner_b.x, corner_a.y),
-                        *corner_b,
+                    ),
+                    (EntityPoint::CornerC(entity_id), *corner_b),
+                    (
+                        EntityPoint::CornerD(entity_id),
                         glam::dvec2(corner_a.x, corner_b.y),
-                    ];
-                    for corner in corners {
+                    ),
+                ];
+                for (handle, corner) in corners {
+                    let corner_selected = vertex_selected(selection, sketch_id, handle);
+                    let corner_hovered = vertex_hovered(hovered_target, sketch_id, handle);
+                    if emphasize_handles || corner_selected || corner_hovered {
                         if let Some(pos) =
                             project_workplane_point(camera, center, workplane, corner)
                         {
-                            paint_handle(painter, pos, color, hovered);
+                            paint_selectable_handle(
+                                painter,
+                                pos,
+                                color,
+                                corner_selected,
+                                corner_hovered || hovered,
+                            );
                         }
                     }
                 }
@@ -273,16 +287,6 @@ fn emphasis_halo(
         0
     };
     (alpha > 0).then(|| Stroke::new(stroke_width + 3.0, with_alpha(color, alpha)))
-}
-
-fn paint_handle(painter: &egui::Painter, pos: Pos2, color: Color32, hovered: bool) {
-    painter.circle_filled(pos, if hovered { 4.0 } else { 3.5 }, with_alpha(color, 42));
-    painter.circle_filled(pos, if hovered { 2.4 } else { 2.1 }, color);
-    painter.circle_stroke(
-        pos,
-        if hovered { 4.0 } else { 3.5 },
-        Stroke::new(1.0, with_alpha(color, 96)),
-    );
 }
 
 fn paint_selectable_handle(

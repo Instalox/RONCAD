@@ -144,6 +144,10 @@ fn entity_point_label(point: EntityPoint) -> &'static str {
         EntityPoint::Point(_) => "Point",
         EntityPoint::Start(_) | EntityPoint::End(_) => "Endpoint",
         EntityPoint::Center(_) => "Center",
+        EntityPoint::CornerA(_)
+        | EntityPoint::CornerB(_)
+        | EntityPoint::CornerC(_)
+        | EntityPoint::CornerD(_) => "Corner",
     }
 }
 

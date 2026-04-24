@@ -21,12 +21,27 @@ pub enum EntityPoint {
     End(SketchEntityId),
     /// Center of a circle or arc.
     Center(SketchEntityId),
+    /// Rectangle corner_a.
+    CornerA(SketchEntityId),
+    /// Rectangle corner at (corner_b.x, corner_a.y).
+    CornerB(SketchEntityId),
+    /// Rectangle corner_b.
+    CornerC(SketchEntityId),
+    /// Rectangle corner at (corner_a.x, corner_b.y).
+    CornerD(SketchEntityId),
 }
 
 impl EntityPoint {
     pub fn entity(self) -> SketchEntityId {
         match self {
-            Self::Point(id) | Self::Start(id) | Self::End(id) | Self::Center(id) => id,
+            Self::Point(id)
+            | Self::Start(id)
+            | Self::End(id)
+            | Self::Center(id)
+            | Self::CornerA(id)
+            | Self::CornerB(id)
+            | Self::CornerC(id)
+            | Self::CornerD(id) => id,
         }
     }
 }

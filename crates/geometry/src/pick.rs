@@ -126,7 +126,12 @@ fn handles_for_entity(id: SketchEntityId, entity: &SketchEntity) -> Vec<(EntityP
     let handles = match entity {
         SketchEntity::Point { .. } => vec![EntityPoint::Point(id)],
         SketchEntity::Line { .. } => vec![EntityPoint::Start(id), EntityPoint::End(id)],
-        SketchEntity::Rectangle { .. } => Vec::new(),
+        SketchEntity::Rectangle { .. } => vec![
+            EntityPoint::CornerA(id),
+            EntityPoint::CornerB(id),
+            EntityPoint::CornerC(id),
+            EntityPoint::CornerD(id),
+        ],
         SketchEntity::Circle { .. } => vec![EntityPoint::Center(id)],
         SketchEntity::Arc { .. } => vec![
             EntityPoint::Start(id),
