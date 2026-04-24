@@ -58,6 +58,20 @@ pub(super) fn paint(
                                         hud_sep(ui);
                                         hud_segment(ui, "Tab", "fields");
                                         hud_segment(ui, "Enter", "commit");
+                                    } else if kind == ActiveToolKind::Select
+                                        && shell.preselection.stack_size() > 1
+                                    {
+                                        hud_sep(ui);
+                                        let label = format!(
+                                            "cycle ({}/{})",
+                                            shell.preselection.index() + 1,
+                                            shell.preselection.stack_size(),
+                                        );
+                                        keycap(ui, "Tab");
+                                        ui.colored_label(
+                                            ThemeColors::TEXT_DIM,
+                                            RichText::new(label).size(11.0),
+                                        );
                                     }
 
                                     if let Some((key, label)) = modifier_hint(kind) {

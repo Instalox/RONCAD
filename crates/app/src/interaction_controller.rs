@@ -131,6 +131,8 @@ pub fn handle_viewport_interaction(
     {
         if active_kind == ActiveToolKind::Extrude && shell.extrude_hud.is_open() {
             shell.extrude_hud.clear();
+        } else if active_kind == ActiveToolKind::Select && !shell.selection.is_empty() {
+            response.commands.push(AppCommand::ClearSelection);
         } else {
             let _ = shell.tool_manager.on_escape();
         }

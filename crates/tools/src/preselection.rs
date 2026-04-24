@@ -77,6 +77,10 @@ impl PreselectionState {
     pub fn stack_size(&self) -> usize {
         self.stack.len()
     }
+
+    pub fn index(&self) -> usize {
+        self.index
+    }
 }
 
 #[cfg(test)]

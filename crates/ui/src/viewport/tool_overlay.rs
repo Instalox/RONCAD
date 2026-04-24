@@ -44,6 +44,9 @@ pub(super) fn paint_preview(
                 &format!("L {} mm", format_length_mm(start.distance(end))),
                 preview_color,
             );
+            if let Some(glyph) = axis_align_glyph(start, end) {
+                paint_axis_glyph(painter, sa, sb, glyph, preview_color);
+            }
         }
         ToolPreview::Rectangle { corner_a, corner_b } => {
             paint_rect(
@@ -394,6 +397,73 @@ fn format_length_mm(length_mm: f64) -> String {
     format!("{length_mm:.3}")
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AxisGlyph {
+    Horizontal,
+    Vertical,
+}
+
+/// 2° cone either side of an axis counts as "auto-aligned" — matches the
+/// silent auto-constraint threshold in the manifesto.
+const AXIS_ALIGN_COS: f64 = 0.999_390_827_0; // cos(2°)
+
+fn axis_align_glyph(start: DVec2, end: DVec2) -> Option<AxisGlyph> {
+    let delta = end - start;
+    let len = delta.length();
+    if len <= f64::EPSILON {
+        return None;
+    }
+    let unit = delta / len;
+    if unit.x.abs() >= AXIS_ALIGN_COS {
+        Some(AxisGlyph::Horizontal)
+    } else if unit.y.abs() >= AXIS_ALIGN_COS {
+        Some(AxisGlyph::Vertical)
+    } else {
+        None
+    }
+}
+
+fn paint_axis_glyph(
+    painter: &egui::Painter,
+    start: Pos2,
+    end: Pos2,
+    glyph: AxisGlyph,
+    color: egui::Color32,
+) {
+    let midpoint = Pos2::new((start.x + end.x) * 0.5, (start.y + end.y) * 0.5);
+    let delta = end - start;
+    if delta.length_sq() <= f32::EPSILON {
+        return;
+    }
+    // Mirror label placement: flip the normal so the glyph sits opposite the
+    // length label, keeping the segment's midpoint readable.
+    let len = delta.length();
+    let mut normal = egui::vec2(-delta.y / len, delta.x / len);
+    if normal.y > 0.0 || (normal.y.abs() < 0.15 && normal.x > 0.0) {
+        normal = -normal;
+    }
+    let anchor = midpoint - normal * 16.0;
+    let text = match glyph {
+        AxisGlyph::Horizontal => "H",
+        AxisGlyph::Vertical => "V",
+    };
+    let soft = color.gamma_multiply(0.72);
+    painter.text(
+        anchor + egui::vec2(1.0, 1.0),
+        Align2::CENTER_CENTER,
+        text,
+        FontId::monospace(10.5),
+        egui::Color32::BLACK,
+    );
+    painter.text(
+        anchor,
+        Align2::CENTER_CENTER,
+        text,
+        FontId::monospace(10.5),
+        soft,
+    );
+}
+
 fn line_label_placement(start: Pos2, end: Pos2) -> (Pos2, Align2) {
     let delta = end - start;
     let midpoint = start + delta * 0.5;
@@ -439,8 +509,9 @@ fn paint_label(
 #[cfg(test)]
 mod tests {
     use egui::{Align2, Pos2};
+    use glam::dvec2;
 
-    use super::line_label_placement;
+    use super::{axis_align_glyph, line_label_placement, AxisGlyph};
 
     #[test]
     fn shallow_line_label_sits_above_segment() {
@@ -464,5 +535,45 @@ mod tests {
 
         assert!(anchor.x < midpoint.x);
         assert_eq!(align, Align2::RIGHT_CENTER);
+    }
+
+    #[test]
+    fn exact_horizontal_triggers_horizontal_glyph() {
+        assert_eq!(
+            axis_align_glyph(dvec2(0.0, 0.0), dvec2(10.0, 0.0)),
+            Some(AxisGlyph::Horizontal),
+        );
+    }
+
+    #[test]
+    fn exact_vertical_triggers_vertical_glyph() {
+        assert_eq!(
+            axis_align_glyph(dvec2(3.0, -2.0), dvec2(3.0, 8.0)),
+            Some(AxisGlyph::Vertical),
+        );
+    }
+
+    #[test]
+    fn within_two_degrees_still_triggers() {
+        // ~1.5 degrees from horizontal.
+        let angle = 1.5_f64.to_radians();
+        let end = dvec2(10.0 * angle.cos(), 10.0 * angle.sin());
+        assert_eq!(
+            axis_align_glyph(dvec2(0.0, 0.0), end),
+            Some(AxisGlyph::Horizontal),
+        );
+    }
+
+    #[test]
+    fn past_threshold_does_not_trigger() {
+        // 5 degrees — well past the 2° cone.
+        let angle = 5.0_f64.to_radians();
+        let end = dvec2(10.0 * angle.cos(), 10.0 * angle.sin());
+        assert_eq!(axis_align_glyph(dvec2(0.0, 0.0), end), None);
+    }
+
+    #[test]
+    fn degenerate_segment_returns_none() {
+        assert_eq!(axis_align_glyph(dvec2(4.0, 4.0), dvec2(4.0, 4.0)), None);
     }
 }
