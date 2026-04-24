@@ -1,5 +1,6 @@
-//! Select tool: click an entity to select it, Ctrl/Shift-click to toggle it,
-//! click empty space to clear the current selection.
+//! Select tool: click an entity to toggle it in the selection (Shapr3D-style
+//! additive selection by default — no modifier required). Click empty space
+//! to clear the current selection.
 
 use glam::DVec2;
 use roncad_core::command::AppCommand;
@@ -13,20 +14,13 @@ pub const SELECT_TOOL_ID: ToolId = ToolId::new("select");
 #[derive(Default)]
 pub struct SelectTool;
 
-/// Shared commit logic: given whether the click is additive and the resolved
-/// target under the cursor, produce the selection commands. Used by both the
-/// tool's own click path (when no preselection stack is maintained) and the
-/// shell controller (which drives clicks from the overlap-cycle stack).
-pub fn select_commands(
-    additive: bool,
-    target: Option<(SketchId, SketchEntityId)>,
-) -> Vec<AppCommand> {
+/// Shared commit logic: plain-click toggles the target, plain-click on empty
+/// clears. Used by both the tool's own click path (when no preselection stack
+/// is maintained) and the shell controller (which drives clicks from the
+/// overlap-cycle stack).
+pub fn select_commands(target: Option<(SketchId, SketchEntityId)>) -> Vec<AppCommand> {
     match target {
-        Some((sketch, entity)) if additive => {
-            vec![AppCommand::ToggleSelection { sketch, entity }]
-        }
-        Some((sketch, entity)) => vec![AppCommand::SelectSingle { sketch, entity }],
-        None if additive => Vec::new(),
+        Some((sketch, entity)) => vec![AppCommand::ToggleSelection { sketch, entity }],
         None => vec![AppCommand::ClearSelection],
     }
 }
@@ -37,17 +31,16 @@ impl Tool for SelectTool {
     }
 
     fn on_pointer_click(&mut self, ctx: &ToolContext<'_>, world_mm: DVec2) -> Vec<AppCommand> {
-        let additive = ctx.modifiers.ctrl || ctx.modifiers.shift;
         let Some(sketch_id) = ctx.active_sketch else {
-            return select_commands(additive, None);
+            return select_commands(None);
         };
         let Some(sketch) = ctx.sketch else {
-            return select_commands(additive, None);
+            return select_commands(None);
         };
 
         let tolerance_mm = ENTITY_PICK_RADIUS_PX / ctx.pixels_per_mm.max(f64::EPSILON);
         let target = pick_entity(sketch, world_mm, tolerance_mm).map(|entity| (sketch_id, entity));
-        select_commands(additive, target)
+        select_commands(target)
     }
 }
 
@@ -67,7 +60,7 @@ mod tests {
     use crate::tool::{Modifiers, Tool, ToolContext};
 
     #[test]
-    fn click_on_entity_emits_single_select() {
+    fn plain_click_on_entity_emits_toggle() {
         let mut project = Project::new_untitled();
         let sketch_id = project.active_sketch.expect("default sketch");
         let entity = project
@@ -90,7 +83,7 @@ mod tests {
         assert_eq!(commands.len(), 1);
         assert!(matches!(
             commands[0],
-            AppCommand::SelectSingle {
+            AppCommand::ToggleSelection {
                 sketch,
                 entity: selected,
             } if sketch == sketch_id && selected == entity
@@ -98,7 +91,9 @@ mod tests {
     }
 
     #[test]
-    fn ctrl_click_on_entity_emits_toggle() {
+    fn modifier_click_still_toggles() {
+        // Modifiers are no longer required, but pressing them should not break
+        // the interaction — still a toggle.
         let mut project = Project::new_untitled();
         let sketch_id = project.active_sketch.expect("default sketch");
         let entity =

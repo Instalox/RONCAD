@@ -40,7 +40,7 @@ impl ActiveToolKind {
 
     pub fn hint(self) -> &'static str {
         match self {
-            Self::Select => "Click to select. Ctrl/Shift-click toggles. Del deletes selection.",
+            Self::Select => "Click to toggle selection. Click empty space to clear. Del deletes.",
             Self::Pan => "Middle-drag orbits the camera. Right-drag pans the view.",
             Self::Line => "Click points to chain lines. Right-click or Esc ends the chain.",
             Self::Rectangle => {

@@ -1,6 +1,6 @@
 //! Selection-verb chip: a compact floating pill that appears when Select is
 //! active and a sketch entity is selected, offering the most relevant next
-//! action. First implementation of "Selection is a verb."
+//! actions. First implementation of "Selection is a verb."
 //!
 //! Positioned at the top-center of the viewport as a first pass. A later
 //! iteration can track the selection centroid or cursor for a truly
@@ -8,6 +8,7 @@
 
 use egui::{Area, Frame, Id, Margin, Order, Pos2, Rect, RichText, Sense, Stroke, Ui};
 use roncad_core::command::AppCommand;
+use roncad_core::constraint::Constraint;
 use roncad_core::ids::{SketchEntityId, SketchId};
 use roncad_core::selection::{Selection, SelectionItem};
 use roncad_geometry::{Project, SketchEntity};
@@ -45,23 +46,25 @@ pub(super) fn paint(
                     ui.horizontal(|ui| {
                         ui.colored_label(
                             ThemeColors::TEXT_DIM,
-                            RichText::new(suggestion.hint).size(10.5),
+                            RichText::new(&suggestion.hint).size(10.5),
                         );
                         let accent = ThemeColors::tool_accent(ActiveToolKind::Dimension);
-                        let label = RichText::new(suggestion.label).size(11.0).strong();
-                        let chip = ui.add(
-                            egui::Button::new(label)
-                                .fill(accent.gamma_multiply(0.18))
-                                .stroke(Stroke::new(1.0, accent.gamma_multiply(0.6)))
-                                .sense(Sense::click()),
-                        );
-                        if chip.clicked() {
-                            match suggestion.action {
-                                ChipAction::EmitCommand(ref cmd) => {
-                                    response.commands.push(cmd.clone());
-                                }
-                                ChipAction::ActivateTool(kind) => {
-                                    shell.tool_manager.set_active(kind);
+                        for button in &suggestion.actions {
+                            let label = RichText::new(button.label).size(11.0).strong();
+                            let chip = ui.add(
+                                egui::Button::new(label)
+                                    .fill(accent.gamma_multiply(0.18))
+                                    .stroke(Stroke::new(1.0, accent.gamma_multiply(0.6)))
+                                    .sense(Sense::click()),
+                            );
+                            if chip.clicked() {
+                                match &button.action {
+                                    ChipAction::EmitCommand(cmd) => {
+                                        response.commands.push(cmd.clone());
+                                    }
+                                    ChipAction::ActivateTool(kind) => {
+                                        shell.tool_manager.set_active(*kind);
+                                    }
                                 }
                             }
                         }
@@ -72,6 +75,10 @@ pub(super) fn paint(
 
 struct Suggestion {
     hint: String,
+    actions: Vec<ChipButton>,
+}
+
+struct ChipButton {
     label: &'static str,
     action: ChipAction,
 }
@@ -94,20 +101,73 @@ fn suggestion_for(selection: &Selection, project: &Project) -> Option<Suggestion
         return None;
     }
 
-    // Single-Line selection: one-click length dimension.
+    // Single entity: one-click length for a line, otherwise Dimension tool.
     if entities.len() == 1 {
         let (sketch_id, entity_id) = entities[0];
         if let Some(sketch) = project.sketches.get(sketch_id) {
             if let Some(SketchEntity::Line { a, b }) = sketch.entities.get(entity_id) {
                 return Some(Suggestion {
                     hint: "1 line".to_string(),
-                    label: "Length",
-                    action: ChipAction::EmitCommand(AppCommand::AddDistanceDimension {
-                        sketch: sketch_id,
-                        start: *a,
-                        end: *b,
-                    }),
+                    actions: vec![ChipButton {
+                        label: "Length",
+                        action: ChipAction::EmitCommand(AppCommand::AddDistanceDimension {
+                            sketch: sketch_id,
+                            start: *a,
+                            end: *b,
+                        }),
+                    }],
                 });
+            }
+        }
+        return Some(Suggestion {
+            hint: "1 selected".to_string(),
+            actions: vec![fallback_dimension()],
+        });
+    }
+
+    // Two entities: offer pairwise relationships if they share a sketch and kind.
+    if entities.len() == 2 {
+        let (sa, ea) = entities[0];
+        let (sb, eb) = entities[1];
+        if sa == sb {
+            if let Some(sketch) = project.sketches.get(sa) {
+                let kind_a = sketch.entities.get(ea).map(entity_kind);
+                let kind_b = sketch.entities.get(eb).map(entity_kind);
+                match (kind_a, kind_b) {
+                    (Some(EntityKind::Line), Some(EntityKind::Line)) => {
+                        return Some(Suggestion {
+                            hint: "2 lines".to_string(),
+                            actions: vec![
+                                constraint_button(
+                                    "Perp",
+                                    sa,
+                                    Constraint::Perpendicular { a: ea, b: eb },
+                                ),
+                                constraint_button(
+                                    "Parallel",
+                                    sa,
+                                    Constraint::Parallel { a: ea, b: eb },
+                                ),
+                                constraint_button(
+                                    "Equal",
+                                    sa,
+                                    Constraint::EqualLength { a: ea, b: eb },
+                                ),
+                            ],
+                        });
+                    }
+                    (Some(EntityKind::CircleLike), Some(EntityKind::CircleLike)) => {
+                        return Some(Suggestion {
+                            hint: "2 circles".to_string(),
+                            actions: vec![constraint_button(
+                                "Equal radii",
+                                sa,
+                                Constraint::EqualRadius { a: ea, b: eb },
+                            )],
+                        });
+                    }
+                    _ => {}
+                }
             }
         }
     }
@@ -120,9 +180,37 @@ fn suggestion_for(selection: &Selection, project: &Project) -> Option<Suggestion
     };
     Some(Suggestion {
         hint,
+        actions: vec![fallback_dimension()],
+    })
+}
+
+fn fallback_dimension() -> ChipButton {
+    ChipButton {
         label: "Dimension",
         action: ChipAction::ActivateTool(ActiveToolKind::Dimension),
-    })
+    }
+}
+
+fn constraint_button(label: &'static str, sketch: SketchId, constraint: Constraint) -> ChipButton {
+    ChipButton {
+        label,
+        action: ChipAction::EmitCommand(AppCommand::AddConstraint { sketch, constraint }),
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum EntityKind {
+    Line,
+    CircleLike,
+    Other,
+}
+
+fn entity_kind(entity: &SketchEntity) -> EntityKind {
+    match entity {
+        SketchEntity::Line { .. } => EntityKind::Line,
+        SketchEntity::Circle { .. } | SketchEntity::Arc { .. } => EntityKind::CircleLike,
+        _ => EntityKind::Other,
+    }
 }
 
 #[cfg(test)]
@@ -130,6 +218,32 @@ mod tests {
     use super::*;
     use glam::dvec2;
     use roncad_geometry::Project;
+
+    fn add_line(project: &mut Project, a: glam::DVec2, b: glam::DVec2) -> SketchEntityId {
+        project
+            .active_sketch_mut()
+            .unwrap()
+            .add(SketchEntity::Line { a, b })
+    }
+
+    fn add_circle(project: &mut Project, center: glam::DVec2, radius: f64) -> SketchEntityId {
+        project
+            .active_sketch_mut()
+            .unwrap()
+            .add(SketchEntity::Circle { center, radius })
+    }
+
+    fn select(project: &Project, ids: &[SketchEntityId]) -> Selection {
+        let sketch = project.active_sketch.unwrap();
+        let mut selection = Selection::default();
+        for id in ids {
+            selection.insert(SelectionItem::SketchEntity {
+                sketch,
+                entity: *id,
+            });
+        }
+        selection
+    }
 
     #[test]
     fn empty_selection_has_no_suggestion() {
@@ -149,27 +263,16 @@ mod tests {
     #[test]
     fn single_line_offers_one_click_length() {
         let mut project = Project::new_untitled();
-        let sketch_id = project.active_sketch.unwrap();
-        let entity = project
-            .active_sketch_mut()
-            .unwrap()
-            .add(SketchEntity::Line {
-                a: dvec2(1.0, 2.0),
-                b: dvec2(7.0, 2.0),
-            });
-        let mut selection = Selection::default();
-        selection.insert(SelectionItem::SketchEntity {
-            sketch: sketch_id,
-            entity,
-        });
+        let line = add_line(&mut project, dvec2(1.0, 2.0), dvec2(7.0, 2.0));
+        let s = suggestion_for(&select(&project, &[line]), &project).expect("suggestion");
 
-        let s = suggestion_for(&selection, &project).expect("suggestion");
-        assert_eq!(s.label, "Length");
         assert_eq!(s.hint, "1 line");
-        match s.action {
+        assert_eq!(s.actions.len(), 1);
+        assert_eq!(s.actions[0].label, "Length");
+        match &s.actions[0].action {
             ChipAction::EmitCommand(AppCommand::AddDistanceDimension { start, end, .. }) => {
-                assert_eq!(start, dvec2(1.0, 2.0));
-                assert_eq!(end, dvec2(7.0, 2.0));
+                assert_eq!(*start, dvec2(1.0, 2.0));
+                assert_eq!(*end, dvec2(7.0, 2.0));
             }
             _ => panic!("expected AddDistanceDimension command"),
         }
@@ -178,62 +281,82 @@ mod tests {
     #[test]
     fn single_circle_falls_back_to_dimension_tool() {
         let mut project = Project::new_untitled();
-        let sketch_id = project.active_sketch.unwrap();
-        let entity = project
-            .active_sketch_mut()
-            .unwrap()
-            .add(SketchEntity::Circle {
-                center: dvec2(0.0, 0.0),
-                radius: 3.0,
-            });
-        let mut selection = Selection::default();
-        selection.insert(SelectionItem::SketchEntity {
-            sketch: sketch_id,
-            entity,
-        });
-
-        let s = suggestion_for(&selection, &project).expect("suggestion");
-        assert_eq!(s.label, "Dimension");
+        let c = add_circle(&mut project, dvec2(0.0, 0.0), 3.0);
+        let s = suggestion_for(&select(&project, &[c]), &project).expect("suggestion");
+        assert_eq!(s.actions.len(), 1);
+        assert_eq!(s.actions[0].label, "Dimension");
         assert!(matches!(
-            s.action,
+            s.actions[0].action,
             ChipAction::ActivateTool(ActiveToolKind::Dimension)
         ));
     }
 
     #[test]
-    fn multi_selection_falls_back_to_dimension_tool() {
+    fn two_lines_offer_perpendicular_parallel_equal() {
         let mut project = Project::new_untitled();
-        let sketch_id = project.active_sketch.unwrap();
-        let a = project
-            .active_sketch_mut()
-            .unwrap()
-            .add(SketchEntity::Line {
-                a: dvec2(0.0, 0.0),
-                b: dvec2(5.0, 0.0),
-            });
-        let b = project
-            .active_sketch_mut()
-            .unwrap()
-            .add(SketchEntity::Line {
-                a: dvec2(0.0, 1.0),
-                b: dvec2(5.0, 1.0),
-            });
-        let mut selection = Selection::default();
-        selection.insert(SelectionItem::SketchEntity {
-            sketch: sketch_id,
-            entity: a,
-        });
-        selection.insert(SelectionItem::SketchEntity {
-            sketch: sketch_id,
-            entity: b,
-        });
+        let a = add_line(&mut project, dvec2(0.0, 0.0), dvec2(5.0, 0.0));
+        let b = add_line(&mut project, dvec2(0.0, 1.0), dvec2(5.0, 1.0));
+        let s = suggestion_for(&select(&project, &[a, b]), &project).expect("suggestion");
 
-        let s = suggestion_for(&selection, &project).expect("suggestion");
-        assert_eq!(s.hint, "2 selected");
+        assert_eq!(s.hint, "2 lines");
+        let labels: Vec<&str> = s.actions.iter().map(|a| a.label).collect();
+        assert_eq!(labels, vec!["Perp", "Parallel", "Equal"]);
+
+        let mut seen = [false; 3];
+        for btn in &s.actions {
+            match &btn.action {
+                ChipAction::EmitCommand(AppCommand::AddConstraint { constraint, .. }) => {
+                    match constraint {
+                        Constraint::Perpendicular { .. } => seen[0] = true,
+                        Constraint::Parallel { .. } => seen[1] = true,
+                        Constraint::EqualLength { .. } => seen[2] = true,
+                        _ => panic!("unexpected constraint kind"),
+                    }
+                }
+                _ => panic!("expected AddConstraint command"),
+            }
+        }
+        assert!(seen.iter().all(|x| *x));
+    }
+
+    #[test]
+    fn two_circles_offer_equal_radii() {
+        let mut project = Project::new_untitled();
+        let a = add_circle(&mut project, dvec2(0.0, 0.0), 1.0);
+        let b = add_circle(&mut project, dvec2(10.0, 0.0), 2.0);
+        let s = suggestion_for(&select(&project, &[a, b]), &project).expect("suggestion");
+
+        assert_eq!(s.hint, "2 circles");
+        assert_eq!(s.actions.len(), 1);
+        assert_eq!(s.actions[0].label, "Equal radii");
         assert!(matches!(
-            s.action,
-            ChipAction::ActivateTool(ActiveToolKind::Dimension)
+            &s.actions[0].action,
+            ChipAction::EmitCommand(AppCommand::AddConstraint {
+                constraint: Constraint::EqualRadius { .. },
+                ..
+            })
         ));
     }
 
+    #[test]
+    fn mixed_line_and_circle_falls_back_to_dimension_tool() {
+        let mut project = Project::new_untitled();
+        let line = add_line(&mut project, dvec2(0.0, 0.0), dvec2(5.0, 0.0));
+        let circle = add_circle(&mut project, dvec2(0.0, 5.0), 2.0);
+        let s = suggestion_for(&select(&project, &[line, circle]), &project).expect("suggestion");
+        assert_eq!(s.hint, "2 selected");
+        assert_eq!(s.actions.len(), 1);
+        assert_eq!(s.actions[0].label, "Dimension");
+    }
+
+    #[test]
+    fn three_lines_fall_back_to_dimension_tool() {
+        let mut project = Project::new_untitled();
+        let a = add_line(&mut project, dvec2(0.0, 0.0), dvec2(5.0, 0.0));
+        let b = add_line(&mut project, dvec2(0.0, 1.0), dvec2(5.0, 1.0));
+        let c = add_line(&mut project, dvec2(0.0, 2.0), dvec2(5.0, 2.0));
+        let s = suggestion_for(&select(&project, &[a, b, c]), &project).expect("suggestion");
+        assert_eq!(s.hint, "3 selected");
+        assert_eq!(s.actions[0].label, "Dimension");
+    }
 }

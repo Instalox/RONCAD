@@ -67,7 +67,7 @@ pub(super) fn paint(
                                             shell.preselection.index() + 1,
                                             shell.preselection.stack_size(),
                                         );
-                                        keycap(ui, "Tab");
+                                        keycap(ui, "`");
                                         ui.colored_label(
                                             ThemeColors::TEXT_DIM,
                                             RichText::new(label).size(11.0),
@@ -111,7 +111,6 @@ fn modifier_hint(kind: ActiveToolKind) -> Option<(&'static str, &'static str)> {
     match kind {
         ActiveToolKind::Line => Some(("Shift", "ortho")),
         ActiveToolKind::Rectangle => Some(("Shift", "square")),
-        ActiveToolKind::Select => Some(("Ctrl", "add")),
         ActiveToolKind::Extrude => Some(("Enter", "apply")),
         ActiveToolKind::Revolve => Some(("Enter", "apply")),
         _ => None,

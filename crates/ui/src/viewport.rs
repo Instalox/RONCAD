@@ -8,6 +8,7 @@ mod dimension_overlay;
 mod dynamic_overlay;
 mod extrude_overlay;
 mod grid_overlay;
+mod hover_label;
 mod hud_overlay;
 mod mini_hud;
 mod nav_gizmo;
@@ -126,6 +127,7 @@ pub fn render_in_rect(
                 shell.tool_manager,
             );
             hud_overlay::paint(ui, rect, shell, interaction.hovered_target.as_ref());
+            hover_label::paint(ui, rect, shell, interaction.hovered_target.as_ref());
             selection_chip::paint(ui, rect, shell, response);
             mini_hud::paint(ui, rect, shell, response);
             dynamic_overlay::paint(ui, rect, shell);

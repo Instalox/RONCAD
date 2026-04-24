@@ -57,10 +57,12 @@ pub fn handle_viewport_interaction(
     };
     update_preselection(shell.preselection, raw_cursor_world, active_kind, &ctx);
     if active_kind == ActiveToolKind::Select && !palette_open && !ui.ctx().text_edit_focused() {
-        let tab_pressed = ui
+        // Backtick rather than Tab: Tab is reserved by egui for focus
+        // traversal across UI widgets and can't be preempted reliably.
+        let cycle_pressed = ui
             .ctx()
-            .input_mut(|input| input.consume_key(egui::Modifiers::NONE, Key::Tab));
-        if tab_pressed {
+            .input_mut(|input| input.consume_key(egui::Modifiers::NONE, Key::Backtick));
+        if cycle_pressed {
             shell.preselection.cycle();
         }
     }
@@ -85,11 +87,11 @@ pub fn handle_viewport_interaction(
         }
     } else if active_kind == ActiveToolKind::Select && resp.clicked_by(PointerButton::Primary) {
         // Route Select clicks through the preselection so Tab-cycled items
-        // commit, not just the topmost pick.
-        let additive = modifiers.ctrl || modifiers.shift;
+        // commit, not just the topmost pick. Selection is additive by default
+        // (Shapr3D-style) — plain click toggles, click on empty clears.
         response
             .commands
-            .extend(select_commands(additive, shell.preselection.current()));
+            .extend(select_commands(shell.preselection.current()));
     } else if resp.clicked_by(PointerButton::Primary) {
         if let Some(pointer) = resp.interact_pointer_pos() {
             let Some(raw_world) = active_workplane(shell).and_then(|plane| {
@@ -402,7 +404,10 @@ fn handle_numpad_navigation(ui: &Ui, shell: &mut ShellContext<'_>, response: &mu
 }
 
 fn handle_tool_shortcuts(ui: &Ui, manager: &mut roncad_tools::ToolManager) {
-    if ui.ctx().egui_wants_keyboard_input() {
+    // Only bail for true text entry (palette, dimension edit, etc.). Button
+    // focus from a just-clicked chip used to swallow tool shortcuts here —
+    // that's why `L` felt dead right after clicking the selection chip.
+    if ui.ctx().text_edit_focused() {
         return;
     }
     if !manager.dynamic_fields().is_empty() {
