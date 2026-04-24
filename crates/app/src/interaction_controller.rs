@@ -7,8 +7,10 @@ use std::f64::consts::{FRAC_PI_2, PI};
 
 use egui::{Key, PointerButton, Pos2, Rect, Ui};
 use glam::DVec2;
-use roncad_core::command::AppCommand;
-use roncad_geometry::{pick_closed_profile, HoverTarget};
+use roncad_core::command::{AppCommand, SelectionEditMode};
+use roncad_geometry::{
+    entities_in_lasso, entities_in_selection_rect, pick_closed_profile, HoverTarget,
+};
 use roncad_tools::{
     select_commands, ActiveToolKind, Modifiers, PreselectionState, SnapEngine, SnapResult,
     ToolContext, ENTITY_PICK_RADIUS_PX,
@@ -81,17 +83,75 @@ pub fn handle_viewport_interaction(
         handle_dynamic_input(ui, shell, cursor_world, &ctx, response);
     }
 
+    if active_kind == ActiveToolKind::Select && resp.drag_started_by(PointerButton::Primary) {
+        if shell.preselection.current().is_none() {
+            if let Some(world) = raw_cursor_world {
+                if modifiers.ctrl {
+                    shell.preselection.begin_lasso(world);
+                } else {
+                    shell.preselection.begin_marquee(world);
+                }
+            }
+        }
+    }
+
+    if active_kind == ActiveToolKind::Select && resp.dragged_by(PointerButton::Primary) {
+        if let Some(world) = raw_cursor_world {
+            if shell.preselection.marquee_active() {
+                shell.preselection.update_marquee(world);
+                ui.ctx().request_repaint();
+            } else if shell.preselection.lasso_active() {
+                shell.preselection.update_lasso(world);
+                ui.ctx().request_repaint();
+            }
+        }
+    }
+
+    if active_kind == ActiveToolKind::Select && resp.drag_stopped_by(PointerButton::Primary) {
+        if let Some(marquee) = shell.preselection.finish_marquee() {
+            if let (Some(sketch_id), Some(sketch)) = (ctx.active_sketch, ctx.sketch) {
+                let entities = entities_in_selection_rect(
+                    sketch,
+                    marquee.min(),
+                    marquee.max(),
+                    marquee.crossing(),
+                );
+                if !entities.is_empty() || !modifiers.shift {
+                    response.commands.push(AppCommand::SelectEntities {
+                        sketch: sketch_id,
+                        entities,
+                        mode: selection_mode_for_modifiers(modifiers),
+                    });
+                }
+            }
+        }
+        if let Some(lasso) = shell.preselection.finish_lasso() {
+            if let (Some(sketch_id), Some(sketch)) = (ctx.active_sketch, ctx.sketch) {
+                let entities = entities_in_lasso(sketch, &lasso);
+                if !entities.is_empty() || !modifiers.shift {
+                    response.commands.push(AppCommand::SelectEntities {
+                        sketch: sketch_id,
+                        entities,
+                        mode: selection_mode_for_modifiers(modifiers),
+                    });
+                }
+            }
+        }
+    }
+
     if active_kind == ActiveToolKind::Extrude && resp.clicked_by(PointerButton::Primary) {
         if let Some(HoverTarget::Profile { sketch, profile }) = hovered_target.as_ref() {
             shell.extrude_hud.arm(*sketch, profile.clone());
         }
-    } else if active_kind == ActiveToolKind::Select && resp.clicked_by(PointerButton::Primary) {
+    } else if active_kind == ActiveToolKind::Select
+        && resp.clicked_by(PointerButton::Primary)
+        && !shell.preselection.selection_drag_active()
+    {
         // Route Select clicks through the preselection so Tab-cycled items
-        // commit, not just the topmost pick. Selection is additive by default
-        // (Shapr3D-style) — plain click toggles, click on empty clears.
+        // commit, not just the topmost pick.
         response
             .commands
-            .extend(select_commands(shell.preselection.current()));
+            .extend(select_commands(shell.preselection.current(), modifiers));
     } else if resp.clicked_by(PointerButton::Primary) {
         if let Some(pointer) = resp.interact_pointer_pos() {
             let Some(raw_world) = active_workplane(shell).and_then(|plane| {
@@ -206,6 +266,16 @@ pub fn handle_viewport_interaction(
     }
 
     ViewportInteractionState { hovered_target }
+}
+
+fn selection_mode_for_modifiers(modifiers: Modifiers) -> SelectionEditMode {
+    if modifiers.shift && modifiers.alt {
+        SelectionEditMode::Remove
+    } else if modifiers.shift {
+        SelectionEditMode::Add
+    } else {
+        SelectionEditMode::Replace
+    }
 }
 
 fn active_snap_result(

@@ -1,7 +1,7 @@
 //! Applies AppCommand instances to the domain Project. This is the single
 //! chokepoint for state mutation; undo/redo will layer on top later.
 
-use roncad_core::command::{AppCommand, ProfileRegion};
+use roncad_core::command::{AppCommand, ProfileRegion, SelectionEditMode};
 use roncad_core::ids::SketchId;
 use roncad_core::selection::{Selection, SelectionItem};
 use roncad_geometry::{
@@ -273,6 +273,45 @@ pub fn apply(
                 });
             } else {
                 selection.clear();
+            }
+        }
+        AppCommand::SelectEntities {
+            sketch,
+            entities,
+            mode,
+        } => {
+            let Some(sketch_doc) = project.sketches.get(*sketch) else {
+                selection.clear();
+                return None;
+            };
+            let valid_entities: Vec<_> = entities
+                .iter()
+                .copied()
+                .filter(|entity| sketch_doc.entities.contains_key(*entity))
+                .collect();
+
+            if *mode == SelectionEditMode::Replace {
+                selection.clear();
+            }
+
+            for entity in valid_entities {
+                let item = SelectionItem::SketchEntity {
+                    sketch: *sketch,
+                    entity,
+                };
+                match mode {
+                    SelectionEditMode::Replace | SelectionEditMode::Add => {
+                        selection.insert(item);
+                    }
+                    SelectionEditMode::Remove => {
+                        selection.remove(&item);
+                    }
+                    SelectionEditMode::Toggle => {
+                        if !selection.remove(&item) {
+                            selection.insert(item);
+                        }
+                    }
+                }
             }
         }
         AppCommand::SelectBody(body) => {

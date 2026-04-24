@@ -9,6 +9,14 @@ use crate::constraint::Constraint;
 use crate::ids::{BodyId, ConstraintId, SketchEntityId, SketchId, WorkplaneId};
 use crate::units::LengthMm;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SelectionEditMode {
+    Replace,
+    Add,
+    Remove,
+    Toggle,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum ProfileRegion {
     Polygon { points: Vec<DVec2> },
@@ -112,6 +120,11 @@ pub enum AppCommand {
     SelectSingle {
         sketch: SketchId,
         entity: SketchEntityId,
+    },
+    SelectEntities {
+        sketch: SketchId,
+        entities: Vec<SketchEntityId>,
+        mode: SelectionEditMode,
     },
     SelectBody(BodyId),
     ToggleSelection {

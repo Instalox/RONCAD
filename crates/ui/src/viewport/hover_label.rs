@@ -24,7 +24,12 @@ pub(super) fn paint(
     let Some(hovered) = hovered else {
         return;
     };
-    let Some(label) = compact_label(shell.project, hovered) else {
+    let Some(label) = compact_label_with_cursor(
+        shell.project,
+        hovered,
+        *shell.cursor_world_mm,
+        shell.camera.pixels_per_mm,
+    ) else {
         return;
     };
     let Some(cursor) = ui.ctx().pointer_latest_pos() else {
@@ -59,12 +64,22 @@ pub(super) fn paint(
         });
 }
 
+#[cfg(test)]
 pub(crate) fn compact_label(project: &Project, hovered: &HoverTarget) -> Option<String> {
+    compact_label_with_cursor(project, hovered, None, 1.0)
+}
+
+fn compact_label_with_cursor(
+    project: &Project,
+    hovered: &HoverTarget,
+    cursor_world_mm: Option<glam::DVec2>,
+    pixels_per_mm: f64,
+) -> Option<String> {
     match hovered {
         HoverTarget::SketchEntity { sketch, entity } => {
             let sketch = project.sketches.get(*sketch)?;
             let entity = sketch.entities.get(*entity)?;
-            Some(entity_label(entity))
+            Some(entity_label(entity, cursor_world_mm, pixels_per_mm))
         }
         HoverTarget::Profile { profile, .. } => {
             Some(format!("Profile · {} mm²", trim_mm(profile.area())))
@@ -72,7 +87,14 @@ pub(crate) fn compact_label(project: &Project, hovered: &HoverTarget) -> Option<
     }
 }
 
-fn entity_label(entity: &SketchEntity) -> String {
+fn entity_label(
+    entity: &SketchEntity,
+    cursor_world_mm: Option<glam::DVec2>,
+    pixels_per_mm: f64,
+) -> String {
+    if let Some(label) = endpoint_label(entity, cursor_world_mm, pixels_per_mm) {
+        return label;
+    }
     match entity {
         SketchEntity::Point { p } => {
             format!("Point · ({}, {})", trim_mm(p.x), trim_mm(p.y))
@@ -100,6 +122,54 @@ fn entity_label(entity: &SketchEntity) -> String {
             )
         }
     }
+}
+
+fn endpoint_label(
+    entity: &SketchEntity,
+    cursor_world_mm: Option<glam::DVec2>,
+    pixels_per_mm: f64,
+) -> Option<String> {
+    let cursor = cursor_world_mm?;
+    let tolerance = 9.0 / pixels_per_mm.max(f64::EPSILON);
+    let mut candidates: Vec<(&'static str, glam::DVec2)> = match entity {
+        SketchEntity::Point { p } => vec![("Point", *p)],
+        SketchEntity::Line { a, b } => vec![("Endpoint", *a), ("Endpoint", *b)],
+        SketchEntity::Rectangle { corner_a, corner_b } => vec![
+            ("Corner", *corner_a),
+            ("Corner", glam::dvec2(corner_b.x, corner_a.y)),
+            ("Corner", *corner_b),
+            ("Corner", glam::dvec2(corner_a.x, corner_b.y)),
+        ],
+        SketchEntity::Circle { center, .. } => vec![("Center", *center)],
+        SketchEntity::Arc {
+            center,
+            radius,
+            start_angle,
+            sweep_angle,
+        } => vec![
+            (
+                "Endpoint",
+                *center + glam::DVec2::new(start_angle.cos(), start_angle.sin()) * *radius,
+            ),
+            (
+                "Endpoint",
+                *center
+                    + glam::DVec2::new(
+                        (*start_angle + *sweep_angle).cos(),
+                        (*start_angle + *sweep_angle).sin(),
+                    ) * *radius,
+            ),
+            ("Center", *center),
+        ],
+    };
+    candidates.sort_by(|(_, a), (_, b)| {
+        a.distance_squared(cursor)
+            .partial_cmp(&b.distance_squared(cursor))
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    let (kind, point) = candidates.first().copied()?;
+    (point.distance(cursor) <= tolerance)
+        .then(|| format!("{} · ({}, {})", kind, trim_mm(point.x), trim_mm(point.y)))
 }
 
 fn trim_mm(value: f64) -> String {
@@ -141,7 +211,10 @@ mod tests {
         };
         project.active_sketch_mut().unwrap().add(line.clone());
         let target = sketch_entity_target(&project, &line);
-        assert_eq!(compact_label(&project, &target).as_deref(), Some("Line · 6 mm"));
+        assert_eq!(
+            compact_label(&project, &target).as_deref(),
+            Some("Line · 6 mm")
+        );
     }
 
     #[test]
@@ -153,7 +226,10 @@ mod tests {
         };
         project.active_sketch_mut().unwrap().add(circle.clone());
         let target = sketch_entity_target(&project, &circle);
-        assert_eq!(compact_label(&project, &target).as_deref(), Some("Circle · R 2.5 mm"));
+        assert_eq!(
+            compact_label(&project, &target).as_deref(),
+            Some("Circle · R 2.5 mm")
+        );
     }
 
     #[test]
@@ -167,7 +243,10 @@ mod tests {
         };
         project.active_sketch_mut().unwrap().add(arc.clone());
         let target = sketch_entity_target(&project, &arc);
-        assert_eq!(compact_label(&project, &target).as_deref(), Some("Arc · R 3 mm · 90°"));
+        assert_eq!(
+            compact_label(&project, &target).as_deref(),
+            Some("Arc · R 3 mm · 90°")
+        );
     }
 
     #[test]
@@ -179,7 +258,10 @@ mod tests {
         };
         project.active_sketch_mut().unwrap().add(rect.clone());
         let target = sketch_entity_target(&project, &rect);
-        assert_eq!(compact_label(&project, &target).as_deref(), Some("Rect · 10 × 4.5 mm"));
+        assert_eq!(
+            compact_label(&project, &target).as_deref(),
+            Some("Rect · 10 × 4.5 mm")
+        );
     }
 
     #[test]

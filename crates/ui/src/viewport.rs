@@ -14,6 +14,7 @@ mod mini_hud;
 mod nav_gizmo;
 mod profile_overlay;
 mod selection_chip;
+mod selection_marquee_overlay;
 mod sketch_overlay;
 mod snap_overlay;
 mod tool_overlay;
@@ -125,6 +126,20 @@ pub fn render_in_rect(
                 shell.camera,
                 shell.project.active_workplane(),
                 shell.tool_manager,
+            );
+            selection_marquee_overlay::paint(
+                ui.painter(),
+                rect,
+                shell.camera,
+                shell.project,
+                shell.preselection.marquee(),
+            );
+            selection_marquee_overlay::paint_lasso(
+                ui.painter(),
+                rect,
+                shell.camera,
+                shell.project,
+                shell.preselection.lasso(),
             );
             hud_overlay::paint(ui, rect, shell, interaction.hovered_target.as_ref());
             hover_label::paint(ui, rect, shell, interaction.hovered_target.as_ref());

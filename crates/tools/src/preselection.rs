@@ -18,6 +18,33 @@ pub struct PreselectionState {
     stack: Vec<SketchEntityId>,
     index: usize,
     anchor: Option<DVec2>,
+    drag: Option<SelectionDrag>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SelectionMarquee {
+    pub start: DVec2,
+    pub current: DVec2,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum SelectionDrag {
+    Box(SelectionMarquee),
+    Lasso(Vec<DVec2>),
+}
+
+impl SelectionMarquee {
+    pub fn crossing(self) -> bool {
+        self.current.x < self.start.x
+    }
+
+    pub fn min(self) -> DVec2 {
+        self.start.min(self.current)
+    }
+
+    pub fn max(self) -> DVec2 {
+        self.start.max(self.current)
+    }
 }
 
 impl PreselectionState {
@@ -26,6 +53,7 @@ impl PreselectionState {
         self.stack.clear();
         self.index = 0;
         self.anchor = None;
+        self.drag = None;
     }
 
     /// Rebuild the stack if the cursor has moved meaningfully or the sketch
@@ -80,6 +108,87 @@ impl PreselectionState {
 
     pub fn index(&self) -> usize {
         self.index
+    }
+
+    pub fn begin_marquee(&mut self, start: DVec2) {
+        self.drag = Some(SelectionDrag::Box(SelectionMarquee {
+            start,
+            current: start,
+        }));
+        self.stack.clear();
+        self.index = 0;
+    }
+
+    pub fn update_marquee(&mut self, current: DVec2) {
+        if let Some(SelectionDrag::Box(marquee)) = self.drag.as_mut() {
+            marquee.current = current;
+        }
+    }
+
+    pub fn finish_marquee(&mut self) -> Option<SelectionMarquee> {
+        match self.drag.take() {
+            Some(SelectionDrag::Box(marquee)) => Some(marquee),
+            Some(SelectionDrag::Lasso(points)) => {
+                self.drag = Some(SelectionDrag::Lasso(points));
+                None
+            }
+            None => None,
+        }
+    }
+
+    pub fn marquee(&self) -> Option<SelectionMarquee> {
+        match self.drag.as_ref() {
+            Some(SelectionDrag::Box(marquee)) => Some(*marquee),
+            _ => None,
+        }
+    }
+
+    pub fn marquee_active(&self) -> bool {
+        matches!(self.drag, Some(SelectionDrag::Box(_)))
+    }
+
+    pub fn begin_lasso(&mut self, start: DVec2) {
+        self.drag = Some(SelectionDrag::Lasso(vec![start]));
+        self.stack.clear();
+        self.index = 0;
+    }
+
+    pub fn update_lasso(&mut self, current: DVec2) {
+        let Some(SelectionDrag::Lasso(points)) = self.drag.as_mut() else {
+            return;
+        };
+        if points
+            .last()
+            .is_none_or(|last| last.distance_squared(current) > 0.04)
+        {
+            points.push(current);
+        }
+    }
+
+    pub fn finish_lasso(&mut self) -> Option<Vec<DVec2>> {
+        match self.drag.take() {
+            Some(SelectionDrag::Lasso(points)) => Some(points),
+            Some(SelectionDrag::Box(marquee)) => {
+                self.drag = Some(SelectionDrag::Box(marquee));
+                None
+            }
+            None => None,
+        }
+    }
+
+    pub fn lasso(&self) -> Option<&[DVec2]> {
+        match self.drag.as_ref() {
+            Some(SelectionDrag::Lasso(points)) => Some(points.as_slice()),
+            _ => None,
+        }
+    }
+
+    pub fn lasso_active(&self) -> bool {
+        matches!(self.drag, Some(SelectionDrag::Lasso(_)))
+    }
+
+    pub fn selection_drag_active(&self) -> bool {
+        self.drag.is_some()
     }
 }
 
