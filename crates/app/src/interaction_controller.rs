@@ -149,12 +149,10 @@ pub fn handle_viewport_interaction(
     {
         // Route Select clicks through the preselection so Tab-cycled items
         // commit, not just the topmost pick.
-        response
-            .commands
-            .extend(select_target_commands(
-                shell.preselection.current_target(),
-                modifiers,
-            ));
+        response.commands.extend(select_target_commands(
+            shell.preselection.current_target(),
+            modifiers,
+        ));
     } else if resp.clicked_by(PointerButton::Primary) {
         if let Some(pointer) = resp.interact_pointer_pos() {
             let Some(raw_world) = active_workplane(shell).and_then(|plane| {

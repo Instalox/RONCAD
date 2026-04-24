@@ -3,10 +3,11 @@
 
 use egui::{Align2, Color32, Vec2};
 use glam::DVec2;
+use roncad_core::constraint::EntityPoint;
 use roncad_core::selection::{Selection, SelectionItem};
 use roncad_geometry::{
-    arc_end_point, arc_mid_point, arc_start_point, HoverTarget, Project, SketchDimension,
-    SketchEntity,
+    arc_end_point, arc_mid_point, arc_start_point, resolve_entity_point, HoverTarget, Project,
+    SketchDimension, SketchEntity,
 };
 use slotmap::Key;
 
@@ -121,9 +122,28 @@ pub(crate) fn hovered_target_summary(
                 }
             })
         }
+        HoverTarget::SketchVertex { sketch, point } => {
+            let sketch = project.sketches.get(*sketch)?;
+            let entity = sketch.entities.get(point.entity())?;
+            let p = resolve_entity_point(*point, entity)?;
+            Some(format!(
+                "Hover {}   X {}   Y {}",
+                entity_point_label(*point),
+                format_value(p.x),
+                format_value(p.y)
+            ))
+        }
         HoverTarget::Profile { profile, .. } => {
             Some(format!("Hover Profile   A {:.3} mm^2", profile.area()))
         }
+    }
+}
+
+fn entity_point_label(point: EntityPoint) -> &'static str {
+    match point {
+        EntityPoint::Point(_) => "Point",
+        EntityPoint::Start(_) | EntityPoint::End(_) => "Endpoint",
+        EntityPoint::Center(_) => "Center",
     }
 }
 

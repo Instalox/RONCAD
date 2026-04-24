@@ -117,15 +117,17 @@ impl PreselectionState {
 
     pub fn current_target(&self) -> Option<(SketchId, PreselectionTarget)> {
         let sketch = self.sketch?;
-        self.stack.get(self.index).copied().map(|target| (sketch, target))
+        self.stack
+            .get(self.index)
+            .copied()
+            .map(|target| (sketch, target))
     }
 
     pub fn hover_target(&self) -> Option<HoverTarget> {
-        self.current_target()
-            .map(|(sketch, target)| match target {
-                PreselectionTarget::Entity(entity) => HoverTarget::sketch_entity(sketch, entity),
-                PreselectionTarget::Vertex(point) => HoverTarget::sketch_vertex(sketch, point),
-            })
+        self.current_target().map(|(sketch, target)| match target {
+            PreselectionTarget::Entity(entity) => HoverTarget::sketch_entity(sketch, entity),
+            PreselectionTarget::Vertex(point) => HoverTarget::sketch_vertex(sketch, point),
+        })
     }
 
     pub fn stack_size(&self) -> usize {
@@ -303,8 +305,11 @@ mod tests {
             1.0,
         );
         state.cycle();
-        let after_cycle = state.current();
-        assert_eq!(after_cycle, Some((sketch_id, PreselectionTarget::Entity(b))));
+        let after_cycle = state.current_target();
+        assert_eq!(
+            after_cycle,
+            Some((sketch_id, PreselectionTarget::Entity(b)))
+        );
 
         // Sub-threshold jitter: anchor unchanged, index preserved.
         state.update(
@@ -313,7 +318,7 @@ mod tests {
             Some(dvec2(5.2, 0.1)),
             1.0,
         );
-        assert_eq!(state.current(), after_cycle);
+        assert_eq!(state.current_target(), after_cycle);
 
         // Past threshold: stack rebuilds, index resets.
         state.update(

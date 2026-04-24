@@ -69,11 +69,6 @@ pub(super) fn paint(
         } else {
             1.6
         };
-        let vertex_width = if selected || hovered || highlighted {
-            1.6
-        } else {
-            1.0
-        };
         let point_radius = if selected && hovered {
             4.5
         } else if selected {
@@ -86,7 +81,6 @@ pub(super) fn paint(
             2.5
         };
         let stroke = Stroke::new(stroke_width, color);
-        let vertex = Stroke::new(vertex_width, color);
         let halo = emphasis_halo(selected, hovered, highlighted, problem, color, stroke_width);
         let emphasize_handles = selected || hovered || highlighted;
         match entity {
@@ -97,11 +91,8 @@ pub(super) fn paint(
                     }
                     let vertex_selected =
                         vertex_selected(selection, sketch_id, EntityPoint::Point(entity_id));
-                    let vertex_hovered = vertex_hovered(
-                        hovered_target,
-                        sketch_id,
-                        EntityPoint::Point(entity_id),
-                    );
+                    let vertex_hovered =
+                        vertex_hovered(hovered_target, sketch_id, EntityPoint::Point(entity_id));
                     paint_selectable_handle(
                         painter,
                         s,
@@ -124,14 +115,16 @@ pub(super) fn paint(
                         vertex_selected(selection, sketch_id, EntityPoint::Start(entity_id));
                     let end_selected =
                         vertex_selected(selection, sketch_id, EntityPoint::End(entity_id));
-                    let start_hovered = vertex_hovered(
-                        hovered_target,
-                        sketch_id,
-                        EntityPoint::Start(entity_id),
-                    );
+                    let start_hovered =
+                        vertex_hovered(hovered_target, sketch_id, EntityPoint::Start(entity_id));
                     let end_hovered =
                         vertex_hovered(hovered_target, sketch_id, EntityPoint::End(entity_id));
-                    if emphasize_handles || start_selected || end_selected || start_hovered || end_hovered {
+                    if emphasize_handles
+                        || start_selected
+                        || end_selected
+                        || start_hovered
+                        || end_hovered
+                    {
                         paint_selectable_handle(
                             painter,
                             sa,
@@ -311,7 +304,11 @@ fn paint_selectable_handle(
     } else {
         3.5
     };
-    painter.circle_filled(pos, radius + 1.8, with_alpha(color, if selected { 72 } else { 42 }));
+    painter.circle_filled(
+        pos,
+        radius + 1.8,
+        with_alpha(color, if selected { 72 } else { 42 }),
+    );
     painter.circle_filled(pos, radius * 0.54, color);
     painter.circle_stroke(
         pos,
@@ -323,7 +320,11 @@ fn paint_selectable_handle(
     );
 }
 
-fn vertex_selected(selection: &Selection, sketch: roncad_core::ids::SketchId, point: EntityPoint) -> bool {
+fn vertex_selected(
+    selection: &Selection,
+    sketch: roncad_core::ids::SketchId,
+    point: EntityPoint,
+) -> bool {
     selection.contains(&SelectionItem::SketchVertex { sketch, point })
 }
 
