@@ -33,7 +33,7 @@ pub use fillet::{
 pub use hover_target::HoverTarget;
 pub use pick::{
     distance_to_entity, entities_in_lasso, entities_in_selection_rect, pick_entities_stack,
-    pick_entity,
+    pick_entity, pick_entity_points_stack,
 };
 pub use profile::{closed_profiles, pick_closed_profile, SketchProfile};
 pub use project::Project;

@@ -2,11 +2,12 @@
 //! chokepoint for state mutation; undo/redo will layer on top later.
 
 use roncad_core::command::{AppCommand, ProfileRegion, SelectionEditMode};
+use roncad_core::constraint::EntityPoint;
 use roncad_core::ids::SketchId;
 use roncad_core::selection::{Selection, SelectionItem};
 use roncad_geometry::{
-    apply_line_fillet, infer_constraints, solve_sketch, Project, Sketch, SketchDimension,
-    SketchEntity, SketchProfile, SolveReport,
+    apply_line_fillet, infer_constraints, resolve_entity_point, solve_sketch, Project, Sketch,
+    SketchDimension, SketchEntity, SketchProfile, SolveReport,
 };
 
 pub fn apply(
@@ -35,6 +36,7 @@ pub fn apply(
             selection.retain(|item| match item {
                 SelectionItem::Sketch(sketch) => sketch != id,
                 SelectionItem::SketchEntity { sketch, .. } => sketch != id,
+                SelectionItem::SketchVertex { sketch, .. } => sketch != id,
                 SelectionItem::Body(_) => true,
             });
             if project.active_sketch == Some(*id) {
@@ -259,6 +261,22 @@ pub fn apply(
                 sketch: *sketch,
                 entity: *entity,
             });
+            selection.remove(&SelectionItem::SketchVertex {
+                sketch: *sketch,
+                point: EntityPoint::Point(*entity),
+            });
+            selection.remove(&SelectionItem::SketchVertex {
+                sketch: *sketch,
+                point: EntityPoint::Start(*entity),
+            });
+            selection.remove(&SelectionItem::SketchVertex {
+                sketch: *sketch,
+                point: EntityPoint::End(*entity),
+            });
+            selection.remove(&SelectionItem::SketchVertex {
+                sketch: *sketch,
+                point: EntityPoint::Center(*entity),
+            });
         }
         AppCommand::SelectSingle { sketch, entity } => {
             let exists = project
@@ -298,6 +316,51 @@ pub fn apply(
                 let item = SelectionItem::SketchEntity {
                     sketch: *sketch,
                     entity,
+                };
+                match mode {
+                    SelectionEditMode::Replace | SelectionEditMode::Add => {
+                        selection.insert(item);
+                    }
+                    SelectionEditMode::Remove => {
+                        selection.remove(&item);
+                    }
+                    SelectionEditMode::Toggle => {
+                        if !selection.remove(&item) {
+                            selection.insert(item);
+                        }
+                    }
+                }
+            }
+        }
+        AppCommand::SelectVertices {
+            sketch,
+            points,
+            mode,
+        } => {
+            let Some(sketch_doc) = project.sketches.get(*sketch) else {
+                selection.clear();
+                return None;
+            };
+            let valid_points: Vec<_> = points
+                .iter()
+                .copied()
+                .filter(|point| {
+                    sketch_doc
+                        .entities
+                        .get(point.entity())
+                        .and_then(|entity| resolve_entity_point(*point, entity))
+                        .is_some()
+                })
+                .collect();
+
+            if *mode == SelectionEditMode::Replace {
+                selection.clear();
+            }
+
+            for point in valid_points {
+                let item = SelectionItem::SketchVertex {
+                    sketch: *sketch,
+                    point,
                 };
                 match mode {
                     SelectionEditMode::Replace | SelectionEditMode::Add => {
@@ -355,6 +418,13 @@ pub fn apply(
                     _ => None,
                 })
                 .collect();
+            let selected_vertices: Vec<_> = selection
+                .iter()
+                .filter_map(|item| match item {
+                    SelectionItem::SketchVertex { sketch, point } => Some((*sketch, *point)),
+                    _ => None,
+                })
+                .collect();
 
             for (sketch, entity) in selected_entities {
                 if let Some(s) = project.sketches.get_mut(sketch) {
@@ -365,6 +435,9 @@ pub fn apply(
             for body in selected_bodies {
                 project.delete_body(body);
                 selection.remove(&SelectionItem::Body(body));
+            }
+            for (sketch, point) in selected_vertices {
+                selection.remove(&SelectionItem::SketchVertex { sketch, point });
             }
         }
         AppCommand::ExtrudeProfile {

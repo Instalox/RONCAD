@@ -1,4 +1,5 @@
 use egui::{Color32, Pos2, Rect, Shape, Stroke};
+use roncad_core::constraint::EntityPoint;
 use roncad_core::selection::{Selection, SelectionItem};
 use roncad_geometry::{
     arc_sample_points, ConstraintDiagnosticKind, HoverTarget, Project, SketchEntity, SolveReport,
@@ -94,8 +95,20 @@ pub(super) fn paint(
                     if let Some(halo) = halo {
                         painter.circle_filled(s, point_radius + 2.8, halo.color);
                     }
-                    painter.circle_stroke(s, point_radius, vertex);
-                    painter.circle_filled(s, point_radius * 0.42, color);
+                    let vertex_selected =
+                        vertex_selected(selection, sketch_id, EntityPoint::Point(entity_id));
+                    let vertex_hovered = vertex_hovered(
+                        hovered_target,
+                        sketch_id,
+                        EntityPoint::Point(entity_id),
+                    );
+                    paint_selectable_handle(
+                        painter,
+                        s,
+                        color,
+                        vertex_selected,
+                        vertex_hovered || hovered,
+                    );
                 }
             }
             SketchEntity::Line { a, b } => {
@@ -107,9 +120,32 @@ pub(super) fn paint(
                         painter.line_segment([sa, sb], halo);
                     }
                     painter.line_segment([sa, sb], stroke);
-                    if emphasize_handles {
-                        paint_handle(painter, sa, color, hovered);
-                        paint_handle(painter, sb, color, hovered);
+                    let start_selected =
+                        vertex_selected(selection, sketch_id, EntityPoint::Start(entity_id));
+                    let end_selected =
+                        vertex_selected(selection, sketch_id, EntityPoint::End(entity_id));
+                    let start_hovered = vertex_hovered(
+                        hovered_target,
+                        sketch_id,
+                        EntityPoint::Start(entity_id),
+                    );
+                    let end_hovered =
+                        vertex_hovered(hovered_target, sketch_id, EntityPoint::End(entity_id));
+                    if emphasize_handles || start_selected || end_selected || start_hovered || end_hovered {
+                        paint_selectable_handle(
+                            painter,
+                            sa,
+                            color,
+                            start_selected,
+                            start_hovered || hovered,
+                        );
+                        paint_selectable_handle(
+                            painter,
+                            sb,
+                            color,
+                            end_selected,
+                            end_hovered || hovered,
+                        );
                     }
                 }
             }
@@ -153,10 +189,20 @@ pub(super) fn paint(
                     painter.add(Shape::closed_line(points.clone(), halo));
                 }
                 painter.add(Shape::closed_line(points, stroke));
-                if emphasize_handles {
+                let center_selected =
+                    vertex_selected(selection, sketch_id, EntityPoint::Center(entity_id));
+                let center_hovered =
+                    vertex_hovered(hovered_target, sketch_id, EntityPoint::Center(entity_id));
+                if emphasize_handles || center_selected || center_hovered {
                     if let Some(center_pos) = project_workplane_point(camera, center, workplane, *c)
                     {
-                        paint_handle(painter, center_pos, color, hovered);
+                        paint_selectable_handle(
+                            painter,
+                            center_pos,
+                            color,
+                            center_selected,
+                            center_hovered || hovered,
+                        );
                     }
                 }
             }
@@ -180,18 +226,30 @@ pub(super) fn paint(
                     painter.add(Shape::line(points.clone(), halo));
                 }
                 painter.add(Shape::line(points, stroke));
-                if emphasize_handles {
-                    let start =
-                        *c + glam::DVec2::new(start_angle.cos(), start_angle.sin()) * *radius;
-                    let end = *c
-                        + glam::DVec2::new(
-                            (*start_angle + *sweep_angle).cos(),
-                            (*start_angle + *sweep_angle).sin(),
-                        ) * *radius;
-                    for point in [start, end] {
+                let start = *c + glam::DVec2::new(start_angle.cos(), start_angle.sin()) * *radius;
+                let end = *c
+                    + glam::DVec2::new(
+                        (*start_angle + *sweep_angle).cos(),
+                        (*start_angle + *sweep_angle).sin(),
+                    ) * *radius;
+                let handles = [
+                    (EntityPoint::Start(entity_id), start),
+                    (EntityPoint::End(entity_id), end),
+                    (EntityPoint::Center(entity_id), *c),
+                ];
+                for (handle, point) in handles {
+                    let handle_selected = vertex_selected(selection, sketch_id, handle);
+                    let handle_hovered = vertex_hovered(hovered_target, sketch_id, handle);
+                    if emphasize_handles || handle_selected || handle_hovered {
                         if let Some(pos) = project_workplane_point(camera, center, workplane, point)
                         {
-                            paint_handle(painter, pos, color, hovered);
+                            paint_selectable_handle(
+                                painter,
+                                pos,
+                                color,
+                                handle_selected,
+                                handle_hovered || hovered,
+                            );
                         }
                     }
                 }
@@ -232,6 +290,49 @@ fn paint_handle(painter: &egui::Painter, pos: Pos2, color: Color32, hovered: boo
         if hovered { 4.0 } else { 3.5 },
         Stroke::new(1.0, with_alpha(color, 96)),
     );
+}
+
+fn paint_selectable_handle(
+    painter: &egui::Painter,
+    pos: Pos2,
+    entity_color: Color32,
+    selected: bool,
+    hovered: bool,
+) {
+    let color = if selected {
+        ThemeColors::ACCENT
+    } else {
+        entity_color
+    };
+    let radius = if selected {
+        5.2
+    } else if hovered {
+        4.2
+    } else {
+        3.5
+    };
+    painter.circle_filled(pos, radius + 1.8, with_alpha(color, if selected { 72 } else { 42 }));
+    painter.circle_filled(pos, radius * 0.54, color);
+    painter.circle_stroke(
+        pos,
+        radius,
+        Stroke::new(
+            if selected { 1.6 } else { 1.0 },
+            with_alpha(color, if selected { 190 } else { 96 }),
+        ),
+    );
+}
+
+fn vertex_selected(selection: &Selection, sketch: roncad_core::ids::SketchId, point: EntityPoint) -> bool {
+    selection.contains(&SelectionItem::SketchVertex { sketch, point })
+}
+
+fn vertex_hovered(
+    hovered_target: Option<&HoverTarget>,
+    sketch: roncad_core::ids::SketchId,
+    point: EntityPoint,
+) -> bool {
+    hovered_target.is_some_and(|target| target.matches_sketch_vertex(sketch, point))
 }
 
 fn with_alpha(color: Color32, alpha: u8) -> Color32 {

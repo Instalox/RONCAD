@@ -12,7 +12,7 @@ use roncad_geometry::{
     entities_in_lasso, entities_in_selection_rect, pick_closed_profile, HoverTarget,
 };
 use roncad_tools::{
-    select_commands, ActiveToolKind, Modifiers, PreselectionState, SnapEngine, SnapResult,
+    select_target_commands, ActiveToolKind, Modifiers, PreselectionState, SnapEngine, SnapResult,
     ToolContext, ENTITY_PICK_RADIUS_PX,
 };
 use roncad_ui::{ShellContext, ShellResponse, ViewportInteractionState};
@@ -151,7 +151,10 @@ pub fn handle_viewport_interaction(
         // commit, not just the topmost pick.
         response
             .commands
-            .extend(select_commands(shell.preselection.current(), modifiers));
+            .extend(select_target_commands(
+                shell.preselection.current_target(),
+                modifiers,
+            ));
     } else if resp.clicked_by(PointerButton::Primary) {
         if let Some(pointer) = resp.interact_pointer_pos() {
             let Some(raw_world) = active_workplane(shell).and_then(|plane| {

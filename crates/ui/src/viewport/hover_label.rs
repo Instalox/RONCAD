@@ -4,7 +4,8 @@
 //! is instead of forcing a trip to the top-left HUD.
 
 use egui::{Area, Frame, Id, Label, Margin, Order, Rect, RichText, Stroke, TextWrapMode, Ui};
-use roncad_geometry::{HoverTarget, Project, SketchEntity};
+use roncad_core::constraint::EntityPoint;
+use roncad_geometry::{resolve_entity_point, HoverTarget, Project, SketchEntity};
 use roncad_tools::ActiveToolKind;
 
 use crate::shell::ShellContext;
@@ -81,9 +82,28 @@ fn compact_label_with_cursor(
             let entity = sketch.entities.get(*entity)?;
             Some(entity_label(entity, cursor_world_mm, pixels_per_mm))
         }
+        HoverTarget::SketchVertex { sketch, point } => {
+            let sketch = project.sketches.get(*sketch)?;
+            let entity = sketch.entities.get(point.entity())?;
+            let position = resolve_entity_point(*point, entity)?;
+            Some(format!(
+                "{} · ({}, {})",
+                point_label(*point),
+                trim_mm(position.x),
+                trim_mm(position.y)
+            ))
+        }
         HoverTarget::Profile { profile, .. } => {
             Some(format!("Profile · {} mm²", trim_mm(profile.area())))
         }
+    }
+}
+
+fn point_label(point: EntityPoint) -> &'static str {
+    match point {
+        EntityPoint::Point(_) => "Point",
+        EntityPoint::Start(_) | EntityPoint::End(_) => "Endpoint",
+        EntityPoint::Center(_) => "Center",
     }
 }
 

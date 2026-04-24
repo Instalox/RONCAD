@@ -5,7 +5,7 @@
 use glam::DVec2;
 use serde::{Deserialize, Serialize};
 
-use crate::constraint::Constraint;
+use crate::constraint::{Constraint, EntityPoint};
 use crate::ids::{BodyId, ConstraintId, SketchEntityId, SketchId, WorkplaneId};
 use crate::units::LengthMm;
 
@@ -124,6 +124,11 @@ pub enum AppCommand {
     SelectEntities {
         sketch: SketchId,
         entities: Vec<SketchEntityId>,
+        mode: SelectionEditMode,
+    },
+    SelectVertices {
+        sketch: SketchId,
+        points: Vec<EntityPoint>,
         mode: SelectionEditMode,
     },
     SelectBody(BodyId),

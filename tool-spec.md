@@ -8,9 +8,11 @@ Concrete UX spec for the five tools that must ship world-class before any new to
 
 **What.** The default tool. Rarely left.
 
-**Hover.** Geometry under cursor gets the preselection weight (lighter than selection). Overlapping stacks cycle with `Tab` — never with a click-menu. A small cursor-local label names the topmost item.
+**Hover.** Geometry under cursor gets the preselection weight (lighter than selection). Vertices/endpoints/centers are first-class hover targets and win over the owning curve when the cursor is within the vertex hit radius. Overlapping stacks cycle with `Tab` — never with a click-menu. A small cursor-local label names the topmost item.
 
-**Click.** Selects. Adds with `Shift`. Subtracts with `Shift+Alt`. *Alt alone is not toggle — too easy to hit accidentally.*
+**Click.** Plain click toggles the hovered item so multi-selection can be built without holding a modifier. `Shift` is explicit add. `Shift+Alt` subtracts. *Alt alone is not toggle — too easy to hit accidentally.*
+
+**Vertex selection.** Endpoints, standalone points, circle/arc centers, and arc ends are selectable independently from their owning entity. Selected vertices use the strongest point handle weight; selected entities use entity stroke weight. A selected vertex may coexist with its owning entity in the selection set.
 
 **Drag (empty).** Box-select. Left-to-right = fully contained; right-to-left = crossing. *Direction-based, not modifier-based.*
 

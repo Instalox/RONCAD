@@ -16,8 +16,8 @@ pub mod tool;
 
 pub use dynamic_input::{DynamicFieldView, DynamicFieldVisualState, DynamicInputState};
 pub use manager::ToolManager;
-pub use preselection::{PreselectionState, SelectionMarquee};
-pub use select_tool::select_commands;
+pub use preselection::{PreselectionState, PreselectionTarget, SelectionMarquee};
+pub use select_tool::{select_commands, select_target_commands};
 pub use snapping::{SnapAxis, SnapEngine, SnapKind, SnapReference, SnapResult};
 pub use tool::{
     ActiveToolKind, DynamicField, Modifiers, Tool, ToolContext, ToolPreview, ENTITY_PICK_RADIUS_PX,

@@ -5,8 +5,9 @@
 //! cursor location. The viewport's hover preview reflects the current index.
 
 use glam::DVec2;
+use roncad_core::constraint::EntityPoint;
 use roncad_core::ids::{SketchEntityId, SketchId};
-use roncad_geometry::{pick_entities_stack, HoverTarget, Sketch};
+use roncad_geometry::{pick_entities_stack, pick_entity_points_stack, HoverTarget, Sketch};
 
 /// Cursor movement beyond this rebuilds the stack. Keeps the user's cycled
 /// choice stable against sub-pixel jitter while feeling responsive to real moves.
@@ -15,10 +16,16 @@ const REBUILD_THRESHOLD_MM: f64 = 0.5;
 #[derive(Default)]
 pub struct PreselectionState {
     sketch: Option<SketchId>,
-    stack: Vec<SketchEntityId>,
+    stack: Vec<PreselectionTarget>,
     index: usize,
     anchor: Option<DVec2>,
     drag: Option<SelectionDrag>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PreselectionTarget {
+    Entity(SketchEntityId),
+    Vertex(EntityPoint),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -77,7 +84,15 @@ impl PreselectionState {
             .is_none_or(|anchor| anchor.distance(world) > REBUILD_THRESHOLD_MM);
 
         if sketch_changed || anchor_moved {
-            self.stack = pick_entities_stack(sketch, world, tolerance_mm);
+            self.stack = pick_entity_points_stack(sketch, world, tolerance_mm)
+                .into_iter()
+                .map(PreselectionTarget::Vertex)
+                .chain(
+                    pick_entities_stack(sketch, world, tolerance_mm)
+                        .into_iter()
+                        .map(PreselectionTarget::Entity),
+                )
+                .collect();
             self.index = 0;
             self.anchor = Some(world);
             self.sketch = Some(sketch_id);
@@ -94,12 +109,23 @@ impl PreselectionState {
 
     pub fn current(&self) -> Option<(SketchId, SketchEntityId)> {
         let sketch = self.sketch?;
-        self.stack.get(self.index).map(|id| (sketch, *id))
+        match self.stack.get(self.index).copied()? {
+            PreselectionTarget::Entity(id) => Some((sketch, id)),
+            PreselectionTarget::Vertex(_) => None,
+        }
+    }
+
+    pub fn current_target(&self) -> Option<(SketchId, PreselectionTarget)> {
+        let sketch = self.sketch?;
+        self.stack.get(self.index).copied().map(|target| (sketch, target))
     }
 
     pub fn hover_target(&self) -> Option<HoverTarget> {
-        self.current()
-            .map(|(s, e)| HoverTarget::sketch_entity(s, e))
+        self.current_target()
+            .map(|(sketch, target)| match target {
+                PreselectionTarget::Entity(entity) => HoverTarget::sketch_entity(sketch, entity),
+                PreselectionTarget::Vertex(point) => HoverTarget::sketch_vertex(sketch, point),
+            })
     }
 
     pub fn stack_size(&self) -> usize {
@@ -240,11 +266,20 @@ mod tests {
             1.0,
         );
 
-        assert_eq!(state.current(), Some((sketch_id, closer)));
+        assert_eq!(
+            state.current_target(),
+            Some((sketch_id, PreselectionTarget::Entity(closer)))
+        );
         state.cycle();
-        assert_eq!(state.current(), Some((sketch_id, farther)));
+        assert_eq!(
+            state.current_target(),
+            Some((sketch_id, PreselectionTarget::Entity(farther)))
+        );
         state.cycle();
-        assert_eq!(state.current(), Some((sketch_id, closer)));
+        assert_eq!(
+            state.current_target(),
+            Some((sketch_id, PreselectionTarget::Entity(closer)))
+        );
     }
 
     #[test]
@@ -269,7 +304,7 @@ mod tests {
         );
         state.cycle();
         let after_cycle = state.current();
-        assert_eq!(after_cycle, Some((sketch_id, b)));
+        assert_eq!(after_cycle, Some((sketch_id, PreselectionTarget::Entity(b))));
 
         // Sub-threshold jitter: anchor unchanged, index preserved.
         state.update(
@@ -287,7 +322,10 @@ mod tests {
             Some(dvec2(6.0, 0.1)),
             1.0,
         );
-        assert_eq!(state.current(), Some((sketch_id, a)));
+        assert_eq!(
+            state.current_target(),
+            Some((sketch_id, PreselectionTarget::Entity(a)))
+        );
     }
 
     #[test]

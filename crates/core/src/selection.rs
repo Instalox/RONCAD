@@ -3,6 +3,7 @@
 
 use std::collections::HashSet;
 
+use crate::constraint::EntityPoint;
 use crate::ids::{BodyId, SketchEntityId, SketchId};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -11,6 +12,10 @@ pub enum SelectionItem {
     SketchEntity {
         sketch: SketchId,
         entity: SketchEntityId,
+    },
+    SketchVertex {
+        sketch: SketchId,
+        point: EntityPoint,
     },
     Body(BodyId),
 }

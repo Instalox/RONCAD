@@ -4,8 +4,9 @@
 use glam::DVec2;
 use roncad_core::command::{AppCommand, SelectionEditMode};
 use roncad_core::ids::{SketchEntityId, SketchId, ToolId};
-use roncad_geometry::pick_entity;
+use roncad_geometry::{pick_entity, pick_entity_points_stack};
 
+use crate::preselection::PreselectionTarget;
 use crate::tool::{ActiveToolKind, Modifiers, Tool, ToolContext, ENTITY_PICK_RADIUS_PX};
 
 pub const SELECT_TOOL_ID: ToolId = ToolId::new("select");
@@ -19,20 +20,54 @@ pub fn select_commands(
     target: Option<(SketchId, SketchEntityId)>,
     modifiers: Modifiers,
 ) -> Vec<AppCommand> {
+    select_target_commands(
+        target.map(|(sketch, entity)| (sketch, PreselectionTarget::Entity(entity))),
+        modifiers,
+    )
+}
+
+pub fn select_target_commands(
+    target: Option<(SketchId, PreselectionTarget)>,
+    modifiers: Modifiers,
+) -> Vec<AppCommand> {
     match (target, modifiers.shift, modifiers.alt) {
-        (Some((sketch, entity)), true, true) => vec![AppCommand::SelectEntities {
-            sketch,
-            entities: vec![entity],
-            mode: SelectionEditMode::Remove,
-        }],
-        (Some((sketch, entity)), true, false) => vec![AppCommand::SelectEntities {
-            sketch,
-            entities: vec![entity],
-            mode: SelectionEditMode::Add,
-        }],
-        (Some((sketch, entity)), _, _) => vec![AppCommand::ToggleSelection { sketch, entity }],
+        (Some((sketch, target)), true, true) => {
+            select_target_with_mode(sketch, target, SelectionEditMode::Remove)
+        }
+        (Some((sketch, target)), true, false) => {
+            select_target_with_mode(sketch, target, SelectionEditMode::Add)
+        }
+        (Some((sketch, PreselectionTarget::Entity(entity))), _, _) => {
+            vec![AppCommand::ToggleSelection { sketch, entity }]
+        }
+        (Some((sketch, PreselectionTarget::Vertex(point))), _, _) => {
+            vec![AppCommand::SelectVertices {
+                sketch,
+                points: vec![point],
+                mode: SelectionEditMode::Toggle,
+            }]
+        }
         (None, false, false) => vec![AppCommand::ClearSelection],
         (None, _, _) => Vec::new(),
+    }
+}
+
+fn select_target_with_mode(
+    sketch: SketchId,
+    target: PreselectionTarget,
+    mode: SelectionEditMode,
+) -> Vec<AppCommand> {
+    match target {
+        PreselectionTarget::Entity(entity) => vec![AppCommand::SelectEntities {
+            sketch,
+            entities: vec![entity],
+            mode,
+        }],
+        PreselectionTarget::Vertex(point) => vec![AppCommand::SelectVertices {
+            sketch,
+            points: vec![point],
+            mode,
+        }],
     }
 }
 
@@ -50,8 +85,13 @@ impl Tool for SelectTool {
         };
 
         let tolerance_mm = ENTITY_PICK_RADIUS_PX / ctx.pixels_per_mm.max(f64::EPSILON);
-        let target = pick_entity(sketch, world_mm, tolerance_mm).map(|entity| (sketch_id, entity));
-        select_commands(target, ctx.modifiers)
+        let target = pick_entity_points_stack(sketch, world_mm, tolerance_mm)
+            .into_iter()
+            .next()
+            .map(PreselectionTarget::Vertex)
+            .or_else(|| pick_entity(sketch, world_mm, tolerance_mm).map(PreselectionTarget::Entity))
+            .map(|target| (sketch_id, target));
+        select_target_commands(target, ctx.modifiers)
     }
 }
 

@@ -3,9 +3,10 @@
 //! needed).
 
 use glam::DVec2;
+use roncad_core::constraint::EntityPoint;
 use roncad_core::ids::SketchEntityId;
 
-use crate::{distance_to_arc, Sketch, SketchEntity};
+use crate::{distance_to_arc, resolve_entity_point, Sketch, SketchEntity};
 
 /// Hit-test the sketch. Returns the id of the nearest entity whose visible
 /// geometry lies within `tolerance_mm` of `world`, or None.
@@ -37,6 +38,23 @@ pub fn pick_entities_stack(
         .collect();
     hits.sort_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
     hits.into_iter().map(|(id, _)| id).collect()
+}
+
+pub fn pick_entity_points_stack(
+    sketch: &Sketch,
+    world: DVec2,
+    tolerance_mm: f64,
+) -> Vec<EntityPoint> {
+    let mut hits: Vec<(EntityPoint, f64)> = sketch
+        .iter()
+        .flat_map(|(id, entity)| handles_for_entity(id, entity))
+        .filter_map(|(handle, point)| {
+            let d = point.distance(world);
+            (d <= tolerance_mm).then_some((handle, d))
+        })
+        .collect();
+    hits.sort_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    hits.into_iter().map(|(handle, _)| handle).collect()
 }
 
 /// Return entities selected by a world-space marquee rectangle.
@@ -102,6 +120,24 @@ fn entity_matches_lasso(entity: &SketchEntity, lasso: &[DVec2]) -> bool {
         || entity_segments(entity)
             .into_iter()
             .any(|(a, b)| polygon_edges(lasso).any(|(c, d)| segments_intersect(a, b, c, d)))
+}
+
+fn handles_for_entity(id: SketchEntityId, entity: &SketchEntity) -> Vec<(EntityPoint, DVec2)> {
+    let handles = match entity {
+        SketchEntity::Point { .. } => vec![EntityPoint::Point(id)],
+        SketchEntity::Line { .. } => vec![EntityPoint::Start(id), EntityPoint::End(id)],
+        SketchEntity::Rectangle { .. } => Vec::new(),
+        SketchEntity::Circle { .. } => vec![EntityPoint::Center(id)],
+        SketchEntity::Arc { .. } => vec![
+            EntityPoint::Start(id),
+            EntityPoint::End(id),
+            EntityPoint::Center(id),
+        ],
+    };
+    handles
+        .into_iter()
+        .filter_map(|handle| resolve_entity_point(handle, entity).map(|point| (handle, point)))
+        .collect()
 }
 
 fn entity_matches_rect(entity: &SketchEntity, min: DVec2, max: DVec2, crossing: bool) -> bool {
@@ -381,6 +417,20 @@ mod tests {
 
         let stack = pick_entities_stack(&sketch, dvec2(5.0, 0.5), 1.0);
         assert_eq!(stack, vec![line]);
+    }
+
+    #[test]
+    fn pick_entity_points_stack_prioritizes_nearest_handle() {
+        let mut sketch = Sketch::new("t", slotmap::KeyData::default().into());
+        let line = sketch.add(SketchEntity::Line {
+            a: dvec2(0.0, 0.0),
+            b: dvec2(10.0, 0.0),
+        });
+
+        let stack = pick_entity_points_stack(&sketch, dvec2(0.2, 0.0), 1.0);
+
+        assert_eq!(stack.first().copied(), Some(EntityPoint::Start(line)));
+        assert!(!stack.contains(&EntityPoint::End(line)));
     }
 
     #[test]
