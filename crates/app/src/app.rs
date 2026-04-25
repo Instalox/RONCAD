@@ -9,14 +9,15 @@ use egui::{vec2, Align2, Id, Key, Layout, Modal, Modifiers, RichText, TextEdit, 
 use roncad_core::command::AppCommand;
 use roncad_core::ids::WorkplaneId;
 use roncad_core::selection::Selection;
-use roncad_geometry::{Project, SolveReport};
+use roncad_geometry::{Project, SolveReport, SolveStatus};
 use roncad_project_io::{load_project, save_project};
 use roncad_rendering::Camera2d;
 use roncad_tools::{ActiveToolKind, PreselectionState, SnapEngine, SnapResult, ToolManager};
 use roncad_ui::{
     apply_dark_theme, render_shell, theme::ThemeColors,
     viewport::wgpu_renderer::BodyRenderResources, CommandPaletteState, ConstraintPanelState,
-    ExtrudeHudState, HudEditState, RevolveHudState, ShellContext, ShellResponse,
+    ExtrudeHudState, HudEditState, RevolveHudState, SelectionMoveState, ShellContext,
+    ShellResponse,
 };
 
 use crate::dispatcher;
@@ -59,6 +60,7 @@ struct ToolRuntimeState {
     snap_result: Option<SnapResult>,
     cursor_world_mm: Option<glam::DVec2>,
     preselection: PreselectionState,
+    selection_move: SelectionMoveState,
 }
 
 #[derive(Default)]
@@ -208,11 +210,15 @@ impl RonCadApp {
         let previous_sketch = self.document.project.active_sketch;
         let mut last_solve_report = None;
         let mut document_changed = false;
+        let mut translated_selection = false;
 
         for command in commands {
             tracing::debug!(?command, "apply");
             if command_mutates_document(&command) {
                 document_changed = true;
+            }
+            if matches!(command, AppCommand::TranslateSketchSelection { .. }) {
+                translated_selection = true;
             }
             let solve_report = dispatcher::apply(
                 &mut self.document.project,
@@ -239,6 +245,17 @@ impl RonCadApp {
             }
         }
         if let Some(report) = last_solve_report {
+            if translated_selection
+                && matches!(
+                    report.status,
+                    SolveStatus::Conflicting | SolveStatus::Failed
+                )
+            {
+                self.document.status_message = Some(StatusMessage {
+                    text: "Move limited by constraints".to_string(),
+                    is_error: true,
+                });
+            }
             self.document.last_solve_report = Some(report);
         }
         if self.ui.new_sketch_plane.is_none() {
@@ -664,6 +681,7 @@ impl RonCadApp {
         self.tool.snap_result = None;
         self.tool.cursor_world_mm = None;
         self.tool.preselection.clear();
+        self.tool.selection_move.clear();
         self.ui.hud_state.clear();
         self.ui.command_palette.close();
         self.ui.extrude_hud.clear();
@@ -740,6 +758,7 @@ impl App for RonCadApp {
             project: &self.document.project,
             cursor_world_mm: &mut self.tool.cursor_world_mm,
             preselection: &mut self.tool.preselection,
+            selection_move: &mut self.tool.selection_move,
             hud_state: &mut self.ui.hud_state,
             command_palette: &mut self.ui.command_palette,
             extrude_hud: &mut self.ui.extrude_hud,

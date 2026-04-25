@@ -136,6 +136,10 @@ pub(crate) fn hovered_target_summary(
         HoverTarget::Profile { profile, .. } => {
             Some(format!("Hover Profile   A {:.3} mm^2", profile.area()))
         }
+        HoverTarget::Body { body } => {
+            let body = project.bodies.get(*body)?;
+            Some(format!("Hover Body   {}", body.name))
+        }
     }
 }
 

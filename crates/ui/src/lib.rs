@@ -23,6 +23,6 @@ pub mod toolbar;
 pub mod viewport;
 
 pub use hud_state::HudEditState;
-pub use shell::{render_shell, ShellContext, ShellResponse};
+pub use shell::{render_shell, SelectionMoveState, ShellContext, ShellResponse};
 pub use theme::apply_dark_theme;
 pub use viewport::{ViewportInteractionHandler, ViewportInteractionState};

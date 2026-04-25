@@ -251,6 +251,16 @@ pub fn apply(
                 }
             }
         }
+        AppCommand::TranslateSketchSelection {
+            sketch,
+            vertices,
+            entities,
+            delta,
+        } => {
+            if let Some(s) = project.sketches.get_mut(*sketch) {
+                translate_sketch_selection(s, vertices, entities, *delta);
+            }
+        }
         AppCommand::DeleteEntity { sketch, entity } => {
             if let Some(s) = project.sketches.get_mut(*sketch) {
                 s.remove(*entity);
@@ -544,6 +554,7 @@ fn sketch_target(command: &AppCommand) -> Option<SketchId> {
         | AppCommand::SetArcSweepDegrees { sketch, .. }
         | AppCommand::SetPointX { sketch, .. }
         | AppCommand::SetPointY { sketch, .. }
+        | AppCommand::TranslateSketchSelection { sketch, .. }
         | AppCommand::DeleteEntity { sketch, .. } => Some(*sketch),
         _ => None,
     }
@@ -606,6 +617,68 @@ fn add_canonical_rectangle(
     [bottom, right, top, left]
 }
 
+fn translate_sketch_selection(
+    sketch: &mut Sketch,
+    vertices: &[EntityPoint],
+    entities: &[SketchEntityId],
+    delta: DVec2,
+) {
+    if delta.length_squared() <= f64::EPSILON || !delta.is_finite() {
+        return;
+    }
+
+    let entity_set: std::collections::HashSet<_> = entities.iter().copied().collect();
+    for entity in &entity_set {
+        translate_entity(sketch, *entity, delta);
+    }
+
+    let mut moved_handles = std::collections::HashSet::new();
+    for vertex in vertices {
+        if entity_set.contains(&vertex.entity()) || !moved_handles.insert(*vertex) {
+            continue;
+        }
+        translate_vertex(sketch, *vertex, delta);
+    }
+}
+
+fn translate_entity(sketch: &mut Sketch, entity: SketchEntityId, delta: DVec2) {
+    let Some(entity) = sketch.entities.get_mut(entity) else {
+        return;
+    };
+    match entity {
+        SketchEntity::Point { p } => *p += delta,
+        SketchEntity::Line { a, b } => {
+            *a += delta;
+            *b += delta;
+        }
+        SketchEntity::Rectangle { corner_a, corner_b } => {
+            *corner_a += delta;
+            *corner_b += delta;
+        }
+        SketchEntity::Circle { center, .. } | SketchEntity::Arc { center, .. } => {
+            *center += delta;
+        }
+    }
+}
+
+fn translate_vertex(sketch: &mut Sketch, point: EntityPoint, delta: DVec2) {
+    let Some(entity) = sketch.entities.get_mut(point.entity()) else {
+        return;
+    };
+    match (point, entity) {
+        (EntityPoint::Point(_), SketchEntity::Point { p }) => *p += delta,
+        (EntityPoint::Start(_), SketchEntity::Line { a, .. }) => *a += delta,
+        (EntityPoint::End(_), SketchEntity::Line { b, .. }) => *b += delta,
+        (EntityPoint::Center(_), SketchEntity::Circle { center, .. })
+        | (EntityPoint::Center(_), SketchEntity::Arc { center, .. }) => {
+            *center += delta;
+        }
+        // Arc endpoints and legacy rectangle corners are intentionally not
+        // direct-manipulable in v1; selecting them still enables constraints.
+        _ => {}
+    }
+}
+
 fn add_constraint_once(sketch: &mut Sketch, constraint: Constraint) {
     if !sketch
         .iter_constraints()
@@ -630,7 +703,7 @@ fn sketch_profile(profile: &ProfileRegion) -> SketchProfile {
 #[cfg(test)]
 mod tests {
     use glam::dvec2;
-    use roncad_core::constraint::Constraint;
+    use roncad_core::constraint::{Constraint, EntityPoint};
     use roncad_core::selection::SelectionItem;
     use roncad_geometry::{Project, Sketch, SketchDimension};
 
@@ -1027,6 +1100,221 @@ mod tests {
         assert_eq!(horizontal, 2);
         assert_eq!(vertical, 2);
         assert_eq!(coincident, 4);
+    }
+
+    #[test]
+    fn translate_selection_moves_one_line_endpoint() {
+        let mut project = Project::new_untitled();
+        let mut selection = Selection::default();
+        let sketch = project.active_sketch.expect("default project has sketch");
+        let line = project
+            .active_sketch_mut()
+            .expect("active sketch")
+            .add(SketchEntity::Line {
+                a: dvec2(0.0, 0.0),
+                b: dvec2(10.0, 0.0),
+            });
+
+        apply(
+            &mut project,
+            &mut selection,
+            &AppCommand::TranslateSketchSelection {
+                sketch,
+                vertices: vec![EntityPoint::Start(line)],
+                entities: vec![],
+                delta: dvec2(2.0, 3.0),
+            },
+        );
+
+        let SketchEntity::Line { a, b } = project.active_sketch().unwrap().entities[line] else {
+            panic!("expected line");
+        };
+        assert_eq!(a, dvec2(2.0, 3.0));
+        assert_eq!(b, dvec2(10.0, 0.0));
+    }
+
+    #[test]
+    fn translate_selection_moves_full_line_entity() {
+        let mut project = Project::new_untitled();
+        let mut selection = Selection::default();
+        let sketch = project.active_sketch.expect("default project has sketch");
+        let line = project
+            .active_sketch_mut()
+            .expect("active sketch")
+            .add(SketchEntity::Line {
+                a: dvec2(0.0, 0.0),
+                b: dvec2(10.0, 0.0),
+            });
+
+        apply(
+            &mut project,
+            &mut selection,
+            &AppCommand::TranslateSketchSelection {
+                sketch,
+                vertices: vec![],
+                entities: vec![line],
+                delta: dvec2(2.0, 3.0),
+            },
+        );
+
+        let SketchEntity::Line { a, b } = project.active_sketch().unwrap().entities[line] else {
+            panic!("expected line");
+        };
+        assert_eq!(a, dvec2(2.0, 3.0));
+        assert_eq!(b, dvec2(12.0, 3.0));
+    }
+
+    #[test]
+    fn translate_selection_moves_vertices_from_different_lines() {
+        let mut project = Project::new_untitled();
+        let mut selection = Selection::default();
+        let sketch = project.active_sketch.expect("default project has sketch");
+        let first = project
+            .active_sketch_mut()
+            .unwrap()
+            .add(SketchEntity::Line {
+                a: dvec2(0.0, 0.0),
+                b: dvec2(1.0, 0.0),
+            });
+        let second = project
+            .active_sketch_mut()
+            .unwrap()
+            .add(SketchEntity::Line {
+                a: dvec2(5.0, 0.0),
+                b: dvec2(6.0, 0.0),
+            });
+
+        apply(
+            &mut project,
+            &mut selection,
+            &AppCommand::TranslateSketchSelection {
+                sketch,
+                vertices: vec![EntityPoint::End(first), EntityPoint::Start(second)],
+                entities: vec![],
+                delta: dvec2(0.0, 2.0),
+            },
+        );
+
+        let SketchEntity::Line { b: first_b, .. } =
+            project.active_sketch().unwrap().entities[first]
+        else {
+            panic!("expected line");
+        };
+        let SketchEntity::Line { a: second_a, .. } =
+            project.active_sketch().unwrap().entities[second]
+        else {
+            panic!("expected line");
+        };
+        assert_eq!(first_b, dvec2(1.0, 2.0));
+        assert_eq!(second_a, dvec2(5.0, 2.0));
+    }
+
+    #[test]
+    fn translate_selection_dedupes_entity_and_vertex() {
+        let mut project = Project::new_untitled();
+        let mut selection = Selection::default();
+        let sketch = project.active_sketch.expect("default project has sketch");
+        let line = project
+            .active_sketch_mut()
+            .unwrap()
+            .add(SketchEntity::Line {
+                a: dvec2(0.0, 0.0),
+                b: dvec2(10.0, 0.0),
+            });
+
+        apply(
+            &mut project,
+            &mut selection,
+            &AppCommand::TranslateSketchSelection {
+                sketch,
+                vertices: vec![EntityPoint::Start(line)],
+                entities: vec![line],
+                delta: dvec2(2.0, 0.0),
+            },
+        );
+
+        let SketchEntity::Line { a, b } = project.active_sketch().unwrap().entities[line] else {
+            panic!("expected line");
+        };
+        assert_eq!(a, dvec2(2.0, 0.0));
+        assert_eq!(b, dvec2(12.0, 0.0));
+    }
+
+    #[test]
+    fn translate_fixed_point_runs_solver_without_corrupting_constraint() {
+        let mut project = Project::new_untitled();
+        let mut selection = Selection::default();
+        let sketch = project.active_sketch.expect("default project has sketch");
+        let point = project
+            .active_sketch_mut()
+            .unwrap()
+            .add(SketchEntity::Point { p: dvec2(1.0, 1.0) });
+        project
+            .active_sketch_mut()
+            .unwrap()
+            .add_constraint(Constraint::FixPoint {
+                point: EntityPoint::Point(point),
+                target: dvec2(1.0, 1.0),
+            });
+
+        let report = apply(
+            &mut project,
+            &mut selection,
+            &AppCommand::TranslateSketchSelection {
+                sketch,
+                vertices: vec![EntityPoint::Point(point)],
+                entities: vec![],
+                delta: dvec2(5.0, 0.0),
+            },
+        );
+
+        assert!(report.is_some());
+        let SketchEntity::Point { p } = project.active_sketch().unwrap().entities[point] else {
+            panic!("expected point");
+        };
+        assert!((p - dvec2(1.0, 1.0)).length() < 1e-6);
+        assert_eq!(
+            project.active_sketch().unwrap().iter_constraints().count(),
+            1
+        );
+    }
+
+    #[test]
+    fn translate_arc_endpoint_is_ignored() {
+        let mut project = Project::new_untitled();
+        let mut selection = Selection::default();
+        let sketch = project.active_sketch.expect("default project has sketch");
+        let arc = project.active_sketch_mut().unwrap().add(SketchEntity::Arc {
+            center: dvec2(0.0, 0.0),
+            radius: 5.0,
+            start_angle: 0.0,
+            sweep_angle: std::f64::consts::FRAC_PI_2,
+        });
+
+        apply(
+            &mut project,
+            &mut selection,
+            &AppCommand::TranslateSketchSelection {
+                sketch,
+                vertices: vec![EntityPoint::Start(arc)],
+                entities: vec![],
+                delta: dvec2(2.0, 0.0),
+            },
+        );
+
+        let SketchEntity::Arc {
+            center,
+            radius,
+            start_angle,
+            sweep_angle,
+        } = project.active_sketch().unwrap().entities[arc]
+        else {
+            panic!("expected arc");
+        };
+        assert_eq!(center, dvec2(0.0, 0.0));
+        assert_eq!(radius, 5.0);
+        assert_eq!(start_angle, 0.0);
+        assert_eq!(sweep_angle, std::f64::consts::FRAC_PI_2);
     }
 
     #[test]

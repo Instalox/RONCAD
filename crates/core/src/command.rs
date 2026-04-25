@@ -131,6 +131,12 @@ pub enum AppCommand {
         points: Vec<EntityPoint>,
         mode: SelectionEditMode,
     },
+    TranslateSketchSelection {
+        sketch: SketchId,
+        vertices: Vec<EntityPoint>,
+        entities: Vec<SketchEntityId>,
+        delta: DVec2,
+    },
     SelectBody(BodyId),
     SelectBodies {
         bodies: Vec<BodyId>,

@@ -96,6 +96,10 @@ fn compact_label_with_cursor(
         HoverTarget::Profile { profile, .. } => {
             Some(format!("Profile · {} mm²", trim_mm(profile.area())))
         }
+        HoverTarget::Body { body } => {
+            let body = project.bodies.get(*body)?;
+            Some(format!("Body · {}", body.name))
+        }
     }
 }
 

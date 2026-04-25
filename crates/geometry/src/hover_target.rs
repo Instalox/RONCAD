@@ -1,7 +1,7 @@
 //! Typed hover and pick targets for viewport interaction.
 
 use roncad_core::constraint::EntityPoint;
-use roncad_core::ids::{SketchEntityId, SketchId};
+use roncad_core::ids::{BodyId, SketchEntityId, SketchId};
 
 use crate::SketchProfile;
 
@@ -19,6 +19,9 @@ pub enum HoverTarget {
         sketch: SketchId,
         profile: SketchProfile,
     },
+    Body {
+        body: BodyId,
+    },
 }
 
 impl HoverTarget {
@@ -34,11 +37,16 @@ impl HoverTarget {
         Self::Profile { sketch, profile }
     }
 
-    pub fn sketch_id(&self) -> SketchId {
+    pub fn body(body: BodyId) -> Self {
+        Self::Body { body }
+    }
+
+    pub fn sketch_id(&self) -> Option<SketchId> {
         match self {
             Self::SketchEntity { sketch, .. }
             | Self::SketchVertex { sketch, .. }
-            | Self::Profile { sketch, .. } => *sketch,
+            | Self::Profile { sketch, .. } => Some(*sketch),
+            Self::Body { .. } => None,
         }
     }
 
@@ -47,6 +55,7 @@ impl HoverTarget {
             Self::SketchEntity { sketch, entity } => Some((*sketch, *entity)),
             Self::SketchVertex { .. } => None,
             Self::Profile { .. } => None,
+            Self::Body { .. } => None,
         }
     }
 
@@ -57,10 +66,17 @@ impl HoverTarget {
         }
     }
 
+    pub fn as_body(&self) -> Option<BodyId> {
+        match self {
+            Self::Body { body } => Some(*body),
+            _ => None,
+        }
+    }
+
     pub fn as_profile(&self) -> Option<&SketchProfile> {
         match self {
             Self::Profile { profile, .. } => Some(profile),
-            Self::SketchEntity { .. } | Self::SketchVertex { .. } => None,
+            Self::SketchEntity { .. } | Self::SketchVertex { .. } | Self::Body { .. } => None,
         }
     }
 

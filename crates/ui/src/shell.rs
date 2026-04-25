@@ -4,7 +4,9 @@
 use std::path::{Path, PathBuf};
 
 use egui::{pos2, Rect, Sense, Ui};
+use glam::DVec2;
 use roncad_core::command::AppCommand;
+use roncad_core::constraint::EntityPoint;
 use roncad_core::ids::{ConstraintId, SketchEntityId, SketchId, WorkplaneId};
 use roncad_core::selection::Selection;
 use roncad_geometry::{Project, SolveReport};
@@ -29,6 +31,7 @@ pub struct ShellContext<'a> {
     pub project: &'a Project,
     pub cursor_world_mm: &'a mut Option<glam::DVec2>,
     pub preselection: &'a mut PreselectionState,
+    pub selection_move: &'a mut SelectionMoveState,
     pub hud_state: &'a mut HudEditState,
     pub command_palette: &'a mut CommandPaletteState,
     pub extrude_hud: &'a mut ExtrudeHudState,
@@ -41,6 +44,66 @@ pub struct ShellContext<'a> {
     pub status_text: Option<&'a str>,
     pub status_is_error: bool,
     pub last_solve_report: Option<&'a SolveReport>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct SelectionMoveState {
+    pub drag: Option<SelectionMoveDrag>,
+}
+
+#[derive(Debug, Clone)]
+pub struct SelectionMoveDrag {
+    pub sketch: SketchId,
+    pub anchor: DVec2,
+    pub current: DVec2,
+    pub vertices: Vec<EntityPoint>,
+    pub entities: Vec<SketchEntityId>,
+}
+
+impl SelectionMoveState {
+    pub fn clear(&mut self) {
+        self.drag = None;
+    }
+
+    pub fn begin(
+        &mut self,
+        sketch: SketchId,
+        anchor: DVec2,
+        vertices: Vec<EntityPoint>,
+        entities: Vec<SketchEntityId>,
+    ) {
+        self.drag = Some(SelectionMoveDrag {
+            sketch,
+            anchor,
+            current: anchor,
+            vertices,
+            entities,
+        });
+    }
+
+    pub fn update(&mut self, current: DVec2) {
+        if let Some(drag) = self.drag.as_mut() {
+            drag.current = current;
+        }
+    }
+
+    pub fn finish(&mut self) -> Option<SelectionMoveDrag> {
+        self.drag.take()
+    }
+
+    pub fn delta(&self) -> Option<DVec2> {
+        self.drag.as_ref().map(SelectionMoveDrag::delta)
+    }
+
+    pub fn is_active(&self) -> bool {
+        self.drag.is_some()
+    }
+}
+
+impl SelectionMoveDrag {
+    pub fn delta(&self) -> DVec2 {
+        self.current - self.anchor
+    }
 }
 
 #[derive(Default)]

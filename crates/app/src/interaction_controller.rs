@@ -8,13 +8,16 @@ use std::f64::consts::{FRAC_PI_2, PI};
 use egui::{Key, PointerButton, Pos2, Rect, Ui};
 use glam::{DVec2, DVec3};
 use roncad_core::command::{AppCommand, SelectionEditMode};
-use roncad_core::ids::BodyId;
+use roncad_core::constraint::EntityPoint;
+use roncad_core::ids::{BodyId, SketchEntityId, SketchId};
+use roncad_core::selection::{Selection, SelectionItem};
 use roncad_geometry::{
-    entities_in_lasso, entities_in_selection_rect, pick_closed_profile, HoverTarget,
+    entities_in_lasso, entities_in_selection_rect, pick_closed_profile, HoverTarget, Sketch,
+    SketchEntity,
 };
 use roncad_tools::{
-    select_target_commands, ActiveToolKind, Modifiers, PreselectionState, SnapEngine, SnapResult,
-    ToolContext, ENTITY_PICK_RADIUS_PX,
+    select_target_commands, ActiveToolKind, Modifiers, PreselectionState, PreselectionTarget,
+    SnapEngine, SnapResult, ToolContext, ENTITY_PICK_RADIUS_PX,
 };
 use roncad_ui::{ShellContext, ShellResponse, ViewportInteractionState};
 
@@ -69,7 +72,16 @@ pub fn handle_viewport_interaction(
             shell.preselection.cycle();
         }
     }
-    let hovered_target = hovered_target(shell.preselection, raw_cursor_world, active_kind, &ctx);
+    let hovered_body = resp
+        .hover_pos()
+        .and_then(|pointer| pick_body(shell.project, shell.camera, pos_to_dvec(pointer), center));
+    let hovered_target = hovered_target(
+        shell.preselection,
+        raw_cursor_world,
+        hovered_body,
+        active_kind,
+        &ctx,
+    );
     let snap_result = raw_cursor_world
         .and_then(|world| active_snap_result(world, active_kind, shell.snap_engine, &ctx));
     *shell.snap_result = snap_result;
@@ -85,7 +97,26 @@ pub fn handle_viewport_interaction(
     }
 
     if active_kind == ActiveToolKind::Select && resp.drag_started_by(PointerButton::Primary) {
-        if shell.preselection.current().is_none() {
+        if modifiers.shift && modifiers.alt {
+            // Subtractive selection is click-only; dragging should not move
+            // geometry the user is explicitly trying to remove.
+        } else if let Some((sketch, target)) = shell.preselection.current_target() {
+            let (vertices, entities) =
+                move_targets_for_selection(shell.selection, ctx.sketch, sketch, Some(target));
+            if !vertices.is_empty() || !entities.is_empty() {
+                if !target_is_selected(shell.selection, sketch, target) {
+                    response
+                        .commands
+                        .extend(select_target_commands(Some((sketch, target)), modifiers));
+                }
+                if let Some(world) = raw_cursor_world {
+                    shell
+                        .selection_move
+                        .begin(sketch, world, vertices, entities);
+                    ui.ctx().request_repaint();
+                }
+            }
+        } else if hovered_body.is_none() {
             if let Some(world) = raw_cursor_world {
                 if modifiers.ctrl {
                     shell.preselection.begin_lasso(world);
@@ -98,7 +129,10 @@ pub fn handle_viewport_interaction(
 
     if active_kind == ActiveToolKind::Select && resp.dragged_by(PointerButton::Primary) {
         if let Some(world) = raw_cursor_world {
-            if shell.preselection.marquee_active() {
+            if shell.selection_move.is_active() {
+                shell.selection_move.update(world);
+                ui.ctx().request_repaint();
+            } else if shell.preselection.marquee_active() {
                 shell.preselection.update_marquee(world);
                 ui.ctx().request_repaint();
             } else if shell.preselection.lasso_active() {
@@ -109,7 +143,19 @@ pub fn handle_viewport_interaction(
     }
 
     if active_kind == ActiveToolKind::Select && resp.drag_stopped_by(PointerButton::Primary) {
-        if let Some(marquee) = shell.preselection.finish_marquee() {
+        if let Some(drag) = shell.selection_move.finish() {
+            let delta = drag.delta();
+            if delta.length_squared() > f64::EPSILON {
+                response
+                    .commands
+                    .push(AppCommand::TranslateSketchSelection {
+                        sketch: drag.sketch,
+                        vertices: drag.vertices,
+                        entities: drag.entities,
+                        delta,
+                    });
+            }
+        } else if let Some(marquee) = shell.preselection.finish_marquee() {
             if let (Some(sketch_id), Some(sketch)) = (ctx.active_sketch, ctx.sketch) {
                 let entities = entities_in_selection_rect(
                     sketch,
@@ -150,7 +196,9 @@ pub fn handle_viewport_interaction(
     {
         // Route Select clicks through the preselection so Tab-cycled items
         // commit, not just the topmost pick.
-        if let Some(target) = shell.preselection.current_target() {
+        if shell.selection_move.is_active() {
+            // Move commits on drag release; suppress the follow-up click.
+        } else if let Some(target) = shell.preselection.current_target() {
             response
                 .commands
                 .extend(select_target_commands(Some(target), modifiers));
@@ -203,7 +251,9 @@ pub fn handle_viewport_interaction(
             .ctx()
             .input_mut(|input| input.consume_key(egui::Modifiers::NONE, Key::Escape))
     {
-        if active_kind == ActiveToolKind::Extrude && shell.extrude_hud.is_open() {
+        if shell.selection_move.is_active() {
+            shell.selection_move.clear();
+        } else if active_kind == ActiveToolKind::Extrude && shell.extrude_hud.is_open() {
             shell.extrude_hud.clear();
         } else if active_kind == ActiveToolKind::Select && !shell.selection.is_empty() {
             response.commands.push(AppCommand::ClearSelection);
@@ -356,6 +406,77 @@ fn ray_aabb_t(origin: DVec3, ray: DVec3, min: DVec3, max: DVec3) -> Option<f64> 
     (t_max >= 0.0).then_some(t_min.max(0.0))
 }
 
+fn target_is_selected(selection: &Selection, sketch: SketchId, target: PreselectionTarget) -> bool {
+    match target {
+        PreselectionTarget::Entity(entity) => {
+            selection.contains(&SelectionItem::SketchEntity { sketch, entity })
+        }
+        PreselectionTarget::Vertex(point) => {
+            selection.contains(&SelectionItem::SketchVertex { sketch, point })
+        }
+    }
+}
+
+fn move_targets_for_selection(
+    selection: &Selection,
+    sketch: Option<&Sketch>,
+    sketch_id: SketchId,
+    extra_target: Option<PreselectionTarget>,
+) -> (Vec<EntityPoint>, Vec<SketchEntityId>) {
+    let mut vertices = Vec::new();
+    let mut entities = Vec::new();
+
+    for item in selection.iter() {
+        match item {
+            SelectionItem::SketchEntity { sketch, entity } if *sketch == sketch_id => {
+                entities.push(*entity);
+            }
+            SelectionItem::SketchVertex { sketch, point } if *sketch == sketch_id => {
+                vertices.push(*point);
+            }
+            _ => {}
+        }
+    }
+
+    if let Some(target) = extra_target {
+        match target {
+            PreselectionTarget::Entity(entity) => entities.push(entity),
+            PreselectionTarget::Vertex(point) => vertices.push(point),
+        }
+    }
+
+    let mut seen_entities = std::collections::HashSet::new();
+    entities.retain(|entity| seen_entities.insert(*entity));
+    let mut seen_vertices = std::collections::HashSet::new();
+    vertices.retain(|point| seen_vertices.insert(*point));
+
+    let entity_set: std::collections::HashSet<_> = entities.iter().copied().collect();
+    let vertices = vertices
+        .into_iter()
+        .filter(|point| !entity_set.contains(&point.entity()))
+        .filter(|point| vertex_can_translate(sketch, *point))
+        .collect();
+
+    (vertices, entities)
+}
+
+fn vertex_can_translate(sketch: Option<&Sketch>, point: EntityPoint) -> bool {
+    let Some(sketch) = sketch else {
+        return false;
+    };
+    let Some(entity) = sketch.entities.get(point.entity()) else {
+        return false;
+    };
+    matches!(
+        (point, entity),
+        (EntityPoint::Point(_), SketchEntity::Point { .. })
+            | (EntityPoint::Start(_), SketchEntity::Line { .. })
+            | (EntityPoint::End(_), SketchEntity::Line { .. })
+            | (EntityPoint::Center(_), SketchEntity::Circle { .. })
+            | (EntityPoint::Center(_), SketchEntity::Arc { .. })
+    )
+}
+
 fn active_snap_result(
     raw_world: DVec2,
     active_kind: ActiveToolKind,
@@ -387,11 +508,14 @@ fn update_preselection(
 fn hovered_target(
     preselection: &PreselectionState,
     raw_world: Option<DVec2>,
+    hovered_body: Option<BodyId>,
     active_kind: ActiveToolKind,
     ctx: &ToolContext<'_>,
 ) -> Option<HoverTarget> {
     match active_kind {
-        ActiveToolKind::Select => preselection.hover_target(),
+        ActiveToolKind::Select => preselection
+            .hover_target()
+            .or_else(|| hovered_body.map(HoverTarget::body)),
         ActiveToolKind::Extrude => {
             let sketch_id = ctx.active_sketch?;
             let sketch = ctx.sketch?;
@@ -607,4 +731,85 @@ fn pos_to_dvec(pos: Pos2) -> DVec2 {
 
 fn active_workplane<'a>(shell: &'a ShellContext<'_>) -> Option<&'a roncad_geometry::Workplane> {
     shell.project.active_workplane()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use roncad_core::command::AppCommand;
+    use roncad_geometry::{Body, Project};
+
+    #[test]
+    fn body_selection_commands_follow_toggle_add_remove_semantics() {
+        let mut project = Project::new_untitled();
+        let body = project.bodies.insert(Body::new("Body 1"));
+
+        assert_eq!(
+            select_body_commands(Some(body), Modifiers::default()),
+            vec![AppCommand::SelectBodies {
+                bodies: vec![body],
+                mode: SelectionEditMode::Toggle,
+            }]
+        );
+        assert_eq!(
+            select_body_commands(
+                Some(body),
+                Modifiers {
+                    shift: true,
+                    ..Modifiers::default()
+                },
+            ),
+            vec![AppCommand::SelectBodies {
+                bodies: vec![body],
+                mode: SelectionEditMode::Add,
+            }]
+        );
+        assert_eq!(
+            select_body_commands(
+                Some(body),
+                Modifiers {
+                    shift: true,
+                    alt: true,
+                    ..Modifiers::default()
+                },
+            ),
+            vec![AppCommand::SelectBodies {
+                bodies: vec![body],
+                mode: SelectionEditMode::Remove,
+            }]
+        );
+        assert_eq!(
+            select_body_commands(None, Modifiers::default()),
+            vec![AppCommand::ClearSelection]
+        );
+    }
+
+    #[test]
+    fn ray_aabb_returns_nearest_positive_hit() {
+        let origin = DVec3::new(0.0, 0.0, -10.0);
+        let ray = DVec3::Z;
+        let near = ray_aabb_t(
+            origin,
+            ray,
+            DVec3::new(-1.0, -1.0, 0.0),
+            DVec3::new(1.0, 1.0, 2.0),
+        )
+        .expect("near hit");
+        let far = ray_aabb_t(
+            origin,
+            ray,
+            DVec3::new(-1.0, -1.0, 5.0),
+            DVec3::new(1.0, 1.0, 7.0),
+        )
+        .expect("far hit");
+
+        assert!(near < far);
+        assert!(ray_aabb_t(
+            origin,
+            ray,
+            DVec3::new(5.0, 5.0, 0.0),
+            DVec3::new(7.0, 7.0, 2.0),
+        )
+        .is_none());
+    }
 }

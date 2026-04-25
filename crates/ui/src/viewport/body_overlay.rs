@@ -3,6 +3,7 @@
 //! target before compositing into the egui viewport.
 
 use egui::{Rect, Shape};
+use roncad_core::ids::BodyId;
 use roncad_core::selection::Selection;
 use roncad_geometry::Project;
 use roncad_rendering::Camera2d;
@@ -15,10 +16,17 @@ pub(super) fn paint(
     camera: &Camera2d,
     project: &Project,
     selection: &Selection,
+    hovered_body: Option<BodyId>,
 ) {
     let pixels_per_point = painter.ctx().pixels_per_point();
-    let callback =
-        wgpu_renderer::build_callback(project, selection, camera, rect, pixels_per_point);
+    let callback = wgpu_renderer::build_callback(
+        project,
+        selection,
+        hovered_body,
+        camera,
+        rect,
+        pixels_per_point,
+    );
     let paint_callback = egui_wgpu::Callback::new_paint_callback(rect, callback);
     painter.add(Shape::Callback(paint_callback));
 }

@@ -2,11 +2,13 @@ use egui::{Color32, Pos2, Rect, Shape, Stroke};
 use roncad_core::constraint::EntityPoint;
 use roncad_core::selection::{Selection, SelectionItem};
 use roncad_geometry::{
-    arc_sample_points, ConstraintDiagnosticKind, HoverTarget, Project, SketchEntity, SolveReport,
+    arc_sample_points, resolve_entity_point, ConstraintDiagnosticKind, HoverTarget, Project,
+    SketchEntity, SolveReport,
 };
 use roncad_rendering::Camera2d;
 
 use super::{project_workplane_point, screen_center, tool_overlay, COLOR_SKETCH};
+use crate::shell::SelectionMoveDrag;
 use crate::theme::ThemeColors;
 
 const COLOR_HOVER: Color32 = Color32::from_rgb(0xF5, 0xC2, 0x52);
@@ -261,6 +263,123 @@ pub(super) fn paint(
                     }
                 }
             }
+        }
+    }
+}
+
+pub(super) fn paint_move_preview(
+    painter: &egui::Painter,
+    rect: Rect,
+    camera: &Camera2d,
+    project: &Project,
+    drag: Option<&SelectionMoveDrag>,
+) {
+    let Some(drag) = drag else {
+        return;
+    };
+    let delta = drag.delta();
+    if delta.length_squared() <= f64::EPSILON {
+        return;
+    }
+    let Some(sketch) = project.sketches.get(drag.sketch) else {
+        return;
+    };
+    let Some(workplane) = project.sketch_workplane(drag.sketch) else {
+        return;
+    };
+    let center = screen_center(rect);
+    let stroke = Stroke::new(2.0, with_alpha(ThemeColors::ACCENT, 170));
+    let handle_color = ThemeColors::ACCENT;
+
+    for entity_id in &drag.entities {
+        let Some(entity) = sketch.entities.get(*entity_id) else {
+            continue;
+        };
+        paint_entity_offset(painter, camera, center, workplane, entity, delta, stroke);
+    }
+
+    for point in &drag.vertices {
+        let Some(entity) = sketch.entities.get(point.entity()) else {
+            continue;
+        };
+        let Some(origin) = resolve_entity_point(*point, entity) else {
+            continue;
+        };
+        if let (Some(a), Some(b)) = (
+            project_workplane_point(camera, center, workplane, origin),
+            project_workplane_point(camera, center, workplane, origin + delta),
+        ) {
+            painter.line_segment([a, b], Stroke::new(1.2, with_alpha(handle_color, 120)));
+            paint_selectable_handle(painter, b, handle_color, true, true);
+        }
+    }
+}
+
+fn paint_entity_offset(
+    painter: &egui::Painter,
+    camera: &Camera2d,
+    screen_center: glam::DVec2,
+    workplane: &roncad_geometry::Workplane,
+    entity: &SketchEntity,
+    delta: glam::DVec2,
+    stroke: Stroke,
+) {
+    match entity {
+        SketchEntity::Point { p } => {
+            if let Some(pos) = project_workplane_point(camera, screen_center, workplane, *p + delta)
+            {
+                paint_selectable_handle(painter, pos, stroke.color, true, true);
+            }
+        }
+        SketchEntity::Line { a, b } => {
+            if let (Some(sa), Some(sb)) = (
+                project_workplane_point(camera, screen_center, workplane, *a + delta),
+                project_workplane_point(camera, screen_center, workplane, *b + delta),
+            ) {
+                painter.line_segment([sa, sb], stroke);
+            }
+        }
+        SketchEntity::Rectangle { corner_a, corner_b } => {
+            tool_overlay::paint_rect(
+                painter,
+                camera,
+                screen_center,
+                workplane,
+                *corner_a + delta,
+                *corner_b + delta,
+                stroke,
+            );
+        }
+        SketchEntity::Circle { center, radius } => {
+            let points: Vec<_> = arc_sample_points(
+                *center + delta,
+                *radius,
+                0.0,
+                std::f64::consts::TAU,
+                std::f64::consts::PI / 32.0,
+            )
+            .into_iter()
+            .filter_map(|point| project_workplane_point(camera, screen_center, workplane, point))
+            .collect();
+            painter.add(Shape::closed_line(points, stroke));
+        }
+        SketchEntity::Arc {
+            center,
+            radius,
+            start_angle,
+            sweep_angle,
+        } => {
+            let points: Vec<_> = arc_sample_points(
+                *center + delta,
+                *radius,
+                *start_angle,
+                *sweep_angle,
+                std::f64::consts::PI / 48.0,
+            )
+            .into_iter()
+            .filter_map(|point| project_workplane_point(camera, screen_center, workplane, point))
+            .collect();
+            painter.add(Shape::line(points, stroke));
         }
     }
 }

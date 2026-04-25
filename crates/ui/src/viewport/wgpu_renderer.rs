@@ -86,6 +86,7 @@ struct OffscreenTargets {
 struct CachedBodyBuffers {
     revision: u64,
     selected: bool,
+    hovered: bool,
     face_buffer: Option<CachedVertexBuffer>,
     edge_buffer: Option<CachedVertexBuffer>,
 }
@@ -401,9 +402,11 @@ impl BodyRenderResources {
         body: &SceneBody,
     ) {
         let cached = self.body_buffers.get(&body.body_id);
-        if cached
-            .is_some_and(|entry| entry.revision == body.revision && entry.selected == body.selected)
-        {
+        if cached.is_some_and(|entry| {
+            entry.revision == body.revision
+                && entry.selected == body.selected
+                && entry.hovered == body.hovered
+        }) {
             return;
         }
 
@@ -414,6 +417,7 @@ impl BodyRenderResources {
             .or_insert_with(CachedBodyBuffers::default);
         entry.revision = body.revision;
         entry.selected = body.selected;
+        entry.hovered = body.hovered;
         write_cached_vertex_buffer(
             device,
             queue,
@@ -438,6 +442,7 @@ impl Default for CachedBodyBuffers {
         Self {
             revision: 0,
             selected: false,
+            hovered: false,
             face_buffer: None,
             edge_buffer: None,
         }
@@ -485,6 +490,7 @@ struct SceneBody {
     body_id: BodyId,
     revision: u64,
     selected: bool,
+    hovered: bool,
     features: Vec<SceneFeature>,
 }
 
@@ -533,7 +539,7 @@ impl WorkplaneTransform {
 
 impl SceneBody {
     fn build_vertices(&self) -> (Vec<FaceVertex>, Vec<EdgeInstance>) {
-        let face_color = body_face_color(self.selected);
+        let face_color = body_face_color(self.selected, self.hovered);
         let mut face_vertices = Vec::<FaceVertex>::new();
         let mut edge_instances = Vec::<EdgeInstance>::new();
 
@@ -549,6 +555,7 @@ impl SceneBody {
                         &mesh,
                         workplane,
                         self.selected,
+                        self.hovered,
                         face_color,
                         &mut face_vertices,
                         &mut edge_instances,
@@ -566,6 +573,7 @@ impl SceneBody {
                         &mesh,
                         workplane,
                         self.selected,
+                        self.hovered,
                         face_color,
                         &mut face_vertices,
                         &mut edge_instances,
@@ -773,26 +781,35 @@ fn vec3_pad(v: [f32; 3], w: f32) -> [f32; 4] {
     [v[0], v[1], v[2], w]
 }
 
-fn body_face_color(selected: bool) -> [f32; 4] {
+fn body_face_color(selected: bool, hovered: bool) -> [f32; 4] {
     let albedo = if selected {
         lighting::BODY_SELECTED
+    } else if hovered {
+        [0.42, 0.58, 0.76]
     } else {
         lighting::BODY_BASE
     };
-    let emissive = if selected { 0.10 } else { 0.0 };
+    let emissive = if selected {
+        0.10
+    } else if hovered {
+        0.05
+    } else {
+        0.0
+    };
     [albedo[0], albedo[1], albedo[2], emissive]
 }
 
-fn body_edge_color(kind: EdgeKind, selected: bool) -> [f32; 4] {
-    match (kind, selected) {
-        (EdgeKind::Crease, false) => lighting::EDGE_CREASE,
-        (EdgeKind::Crease, true) => lighting::EDGE_CREASE_SELECTED,
-        (EdgeKind::Border, false) => lighting::EDGE_BORDER,
-        (EdgeKind::Border, true) => lighting::EDGE_BORDER_SELECTED,
+fn body_edge_color(kind: EdgeKind, selected: bool, hovered: bool) -> [f32; 4] {
+    match (kind, selected, hovered) {
+        (_, false, true) => [0.94, 0.76, 0.32, 0.95],
+        (EdgeKind::Crease, false, false) => lighting::EDGE_CREASE,
+        (EdgeKind::Crease, true, _) => lighting::EDGE_CREASE_SELECTED,
+        (EdgeKind::Border, false, false) => lighting::EDGE_BORDER,
+        (EdgeKind::Border, true, _) => lighting::EDGE_BORDER_SELECTED,
     }
 }
 
-fn body_edge_style(kind: EdgeKind, selected: bool) -> [f32; 2] {
+fn body_edge_style(kind: EdgeKind, selected: bool, hovered: bool) -> [f32; 2] {
     let (half_width, feather) = match kind {
         EdgeKind::Crease => (
             lighting::EDGE_CREASE_HALF_WIDTH_PX,
@@ -805,6 +822,8 @@ fn body_edge_style(kind: EdgeKind, selected: bool) -> [f32; 2] {
     };
     let half_width = if selected {
         half_width + lighting::EDGE_SELECTED_BOOST_PX
+    } else if hovered {
+        half_width + 0.55
     } else {
         half_width
     };
@@ -815,6 +834,7 @@ fn append_feature_mesh(
     mesh: &FeatureMesh3d,
     workplane: &WorkplaneTransform,
     selected: bool,
+    hovered: bool,
     face_color: [f32; 4],
     face_vertices: &mut Vec<FaceVertex>,
     edge_instances: &mut Vec<EdgeInstance>,
@@ -834,8 +854,8 @@ fn append_feature_mesh(
     }
 
     for edge in &mesh.edges {
-        let color = body_edge_color(edge.kind, selected);
-        let params = body_edge_style(edge.kind, selected);
+        let color = body_edge_color(edge.kind, selected, hovered);
+        let params = body_edge_style(edge.kind, selected, hovered);
         let start = workplane.local_position(edge.start);
         let end = workplane.local_position(edge.end);
         edge_instances.push(EdgeInstance {
@@ -853,6 +873,7 @@ fn append_feature_mesh(
 pub fn build_callback(
     project: &Project,
     selection: &Selection,
+    hovered_body: Option<BodyId>,
     camera: &Camera2d,
     rect_points: Rect,
     pixels_per_point: f32,
@@ -893,6 +914,7 @@ pub fn build_callback(
     let mut bodies = Vec::<SceneBody>::new();
     for (body_id, body) in project.bodies.iter() {
         let selected = selection.contains(&SelectionItem::Body(body_id));
+        let hovered = hovered_body == Some(body_id);
         let features = project
             .body_features(body_id)
             .filter_map(|(_, feature)| scene_feature_from_project(project, feature))
@@ -901,6 +923,7 @@ pub fn build_callback(
             body_id,
             revision: body.mesh_revision(),
             selected,
+            hovered,
             features,
         });
     }

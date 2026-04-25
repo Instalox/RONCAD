@@ -76,6 +76,10 @@ pub fn render_in_rect(
                 shell.camera,
                 shell.project,
                 shell.selection,
+                interaction
+                    .hovered_target
+                    .as_ref()
+                    .and_then(HoverTarget::as_body),
             );
             sketch_overlay::paint(
                 ui.painter(),
@@ -126,6 +130,13 @@ pub fn render_in_rect(
                 shell.camera,
                 shell.project.active_workplane(),
                 shell.tool_manager,
+            );
+            sketch_overlay::paint_move_preview(
+                ui.painter(),
+                rect,
+                shell.camera,
+                shell.project,
+                shell.selection_move.drag.as_ref(),
             );
             selection_marquee_overlay::paint(
                 ui.painter(),
